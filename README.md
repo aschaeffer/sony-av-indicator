@@ -23,3 +23,11 @@ Adjust the port of your AVR:
 * Ubuntu 16.04
 * Sony STR-DN-860
 
+## Authors
+
+* Andreas Schaeffer
+* Michael Kapuscik
+
+## License
+
+GNU GENERAL PUBLIC LICENSE, Version 3
