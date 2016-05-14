@@ -8,6 +8,7 @@ import time
 import signal
 import gi
 import os
+import threading
 
 gi.require_version("Gtk", "3.0")
 from gi.repository import Gtk as gtk
@@ -30,20 +31,52 @@ ICON_PATH = "/usr/share/icons/ubuntu-mono-dark/status/24"
 
 SOURCE_NAMES = [ "bdDvd", "game", "satCaTV", "video", "tv", "saCd", "fmTuner", "usb", "bluetooth" ]
 
-CMD_MIN_VOLUME = bytearray([0x02, 0x06, 0xA0, 0x52, 0x00, 0x03, 0x00, 0x00, 0x00])
-CMD_MAX_VOLUME = bytearray([0x02, 0x06, 0xA0, 0x52, 0x00, 0x03, 0x00, 0x4A, 0x00])
-CMD_MUTE = bytearray([0x02, 0x04, 0xA0, 0x53, 0x00, 0x01, 0x00])
-CMD_UNMUTE = bytearray([0x02, 0x04, 0xA0, 0x53, 0x00, 0x00, 0x00])
+CMD_MIN_VOLUME =  bytearray([0x02, 0x06, 0xA0, 0x52, 0x00, 0x03, 0x00, 0x00, 0x00])
+CMD_MAX_VOLUME =  bytearray([0x02, 0x06, 0xA0, 0x52, 0x00, 0x03, 0x00, 0x4A, 0x00])
+
+CMD_MUTE =        bytearray([0x02, 0x04, 0xA0, 0x53, 0x00, 0x01, 0x00])
+CMD_UNMUTE =      bytearray([0x02, 0x04, 0xA0, 0x53, 0x00, 0x00, 0x00])
 CMD_SOURCE_MAP = {
-    "bdDvd": bytearray([0x02, 0x04, 0xA0, 0x42, 0x00, 0x1b, 0x00]),
-    "game": bytearray([0x02, 0x04, 0xA0, 0x42, 0x00, 0x1c, 0x00]),
-    "satCaTV": bytearray([0x02, 0x04, 0xA0, 0x42, 0x00, 0x16, 0x00]),
-    "video": bytearray([0x02, 0x04, 0xA0, 0x42, 0x00, 0x10, 0x00]),
-    "tv": bytearray([0x02, 0x04, 0xA0, 0x42, 0x00, 0x1a, 0x00]),
-    "saCd": bytearray([0x02, 0x04, 0xA0, 0x42, 0x00, 0x02, 0x00]),
-    "fmTuner": bytearray([0x02, 0x04, 0xA0, 0x42, 0x00, 0x2e, 0x00]),
-    "usb": bytearray([0x02, 0x04, 0xA0, 0x42, 0x00, 0x34, 0x00]),
-    "bluetooth": bytearray([0x02, 0x04, 0xA0, 0x42, 0x00, 0x34, 0x00])
+    "bdDvd":      bytearray([0x02, 0x04, 0xA0, 0x42, 0x00, 0x1b, 0x00]),
+    "game":       bytearray([0x02, 0x04, 0xA0, 0x42, 0x00, 0x1c, 0x00]),
+    "satCaTV":    bytearray([0x02, 0x04, 0xA0, 0x42, 0x00, 0x16, 0x00]),
+    "video":      bytearray([0x02, 0x04, 0xA0, 0x42, 0x00, 0x10, 0x00]),
+    "tv":         bytearray([0x02, 0x04, 0xA0, 0x42, 0x00, 0x1a, 0x00]),
+    "saCd":       bytearray([0x02, 0x04, 0xA0, 0x42, 0x00, 0x02, 0x00]),
+    "fmTuner":    bytearray([0x02, 0x04, 0xA0, 0x42, 0x00, 0x2e, 0x00]),
+    "usb":        bytearray([0x02, 0x04, 0xA0, 0x42, 0x00, 0x34, 0x00]),
+    "bluetooth":  bytearray([0x02, 0x04, 0xA0, 0x42, 0x00, 0x34, 0x00])
+}
+
+FEEDBACK_VOLUME = bytearray([0x02, 0x06, 0xA8, 0x8b, 0x00, 0x03, 0x00])
+FEEDBACK_MUTE =   bytearray([0x02, 0x07, 0xA8, 0x82, 0x00, 0x2E, 0x00, 0x13, 0x00])
+FEEDBACK_UNMUTE = bytearray([0x02, 0x07, 0xA8, 0x82, 0x00, 0x2E, 0x00, 0x11, 0x00])
+
+FEEDBACK_UNK_1 =  bytearray([0x02, 0x07, 0xA8, 0x82, 0x00, 0x33, 0x00, 0x11, 0x00])
+FEEDBACK_UNK_2 =  bytearray([0x02, 0x07, 0xA8, 0x82, 0x00, 0x02, 0x00, 0x11, 0x00])
+
+FEEDBACK_SOURCE_MAP = {
+    "bdDvd":      bytearray([0x02, 0x04, 0xAB, 0x82, 0x33, 0x00]),
+    "game":       bytearray([0x02, 0x04, 0xAB, 0x82, 0x23, 0x00]),
+    "satCaTV":    bytearray([0x02, 0x04, 0xAB, 0x82, 0x00, 0x00]),
+    "video":      bytearray([0x02, 0x04, 0xAB, 0x82, 0x21, 0x00]),
+    "tv":         bytearray([0x02, 0x04, 0xAB, 0x82, 0x21, 0x00]),
+    "saCd":       bytearray([0x02, 0x04, 0xAB, 0x82, 0x27, 0x00]),
+    "fmTuner":    bytearray([0x02, 0x04, 0xAB, 0x82, 0x27, 0x00]),
+    "usb":        bytearray([0x02, 0x04, 0xAB, 0x82, 0x24, 0x00]),
+    "bluetooth":  bytearray([])
+}
+
+FEEDBACK_SOURCE_MAP_2 = {
+    "bdDvd":      bytearray([0x02, 0x07, 0xA8, 0x82, 0x00, 0x1B, 0x00, 0x11, 0x00]),
+    "game":       bytearray([0x02, 0x07, 0xA8, 0x82, 0x00, 0x1C, 0x00, 0x11, 0x00]),
+    "satCaTV":    bytearray([0x02, 0x07, 0xA8, 0x82, 0x00, 0x16, 0x00, 0x11, 0x00]),
+    "video":      bytearray([0x02, 0x07, 0xA8, 0x82, 0x00, 0xFF, 0x00, 0x11, 0x00]),
+    "tv":         bytearray([0x02, 0x07, 0xA8, 0x82, 0x00, 0x1A, 0x00, 0x11, 0x00]),
+    "saCd":       bytearray([0x02, 0x07, 0xA8, 0x82, 0x00, 0x02, 0x00, 0x11, 0x00]),
+    "fmTuner":    bytearray([]),
+    "usb":        bytearray([0x02, 0x07, 0xA8, 0x82, 0x00, 0x34, 0x00, 0x11, 0x00]),
+    "bluetooth":  bytearray([0x02, 0x07, 0xA8, 0x82, 0x00, 0x33, 0x00, 0x11, 0x00])
 }
 
 SOURCE_MENU_MAP = {
@@ -65,6 +98,7 @@ slide_speed = 0.05
 scroll_speed = 0.1
 muted = False
 _indicator = None
+_watcher_thread = None
 
 
 def connect():
@@ -110,6 +144,12 @@ def update_volume(vol):
         muted = False
     current_volume = vol
     set_volume_icon(vol)
+    print "volume ", current_volume
+
+def update_muted(_muted):
+    global muted
+    muted = _muted
+    set_volume_icon(current_volume)
 
 def set_volume(source, vol):
     cmd = bytearray([0x02, 0x06, 0xA0, 0x52, 0x00, 0x03, 0x00, vol, 0x00])
@@ -156,21 +196,15 @@ def mute(source):
     s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     s.connect((TCP_IP, TCP_PORT))
     s.send(CMD_MUTE)
-    data = s.recv(BUFFER_SIZE)
     s.close()
-    global muted
-    muted = True
-    set_volume_icon(current_volume)
+    update_muted(True)
 
 def unmute(source):
     s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     s.connect((TCP_IP, TCP_PORT))
     s.send(CMD_UNMUTE)
-    data = s.recv(BUFFER_SIZE)
     s.close()
-    global muted
-    muted = False
-    set_volume_icon(current_volume)
+    update_muted(False)
 
 def toggle_mute(source):
     if muted:
@@ -227,7 +261,64 @@ def build_menu(indicator):
     return menu
 
 def quit(source):
+    _feedback_watcher_thread.kill()
+    _feedback_watcher_thread.join(8)
     gtk.main_quit()
+
+class FeedbackWatcher(threading.Thread):
+
+    _ended = False
+
+    def __init__(self):
+        threading.Thread.__init__(self)
+
+    def kill(self):
+        self._ended = True
+
+    def check_volume(self, data):
+        if FEEDBACK_VOLUME == data[:-1]:
+            update_volume(ord(data[-1]))
+        elif FEEDBACK_MUTE == data:
+            update_muted(True)
+        elif FEEDBACK_UNMUTE == data:
+            update_muted(False)
+        else:
+            return False
+        return True
+
+    def check_source(self, data):
+        source_switched = False
+        for source_name, source_feedback in FEEDBACK_SOURCE_MAP.iteritems():
+            # print source_name
+            # print source_feedback
+            # print data
+            if source_feedback == data:
+                print "Switched to source: ", source_name
+                source_switched = True
+        return source_switched
+
+    def print_data(self, data):
+        print "Received unknown data:", data
+        for i in data:
+            print hex(ord(i))
+
+    def run(self):
+        while not self._ended:
+            try:
+                s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                s.settimeout(0.2)
+                s.connect((TCP_IP, TCP_PORT))
+                data = s.recv(BUFFER_SIZE)
+                s.close()
+                if not self.check_volume(data) and not self.check_source(data):
+                    self.print_data(data)
+            except:
+                pass
+
+def watch_feedback():
+    global _feedback_watcher_thread
+    _feedback_watcher_thread = FeedbackWatcher()
+    _feedback_watcher_thread.start()
 
 def main():
     indicator = appindicator.Indicator.new(APPINDICATOR_ID, get_volume_icon_path(get_volume_icon(current_volume)), appindicator.IndicatorCategory.SYSTEM_SERVICES)
@@ -237,6 +328,7 @@ def main():
     global _indicator
     _indicator = indicator
     signal.signal(signal.SIGINT, signal.SIG_DFL)
+    watch_feedback()
     gtk.main()
 
 if __name__ == "__main__":
