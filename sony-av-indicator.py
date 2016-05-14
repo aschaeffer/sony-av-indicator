@@ -1,5 +1,11 @@
 #!/usr/bin/env python
 
+# TODO: radio buttons in menus (source, field)
+# TODO: request states (source, field, volume, ...) during startup
+# TODO: scan for devices (ip)
+# TODO: wake on lan (mac address)
+# TODO: reconnect when power off
+
 __author__ = "andreasschaeffer"
 __author__ = "michaelkapuscik"
 
@@ -9,6 +15,8 @@ import signal
 import gi
 import os
 import threading
+import logging
+import traceback
 
 gi.require_version("Gtk", "3.0")
 gi.require_version("AppIndicator3", "0.1")
@@ -18,6 +26,8 @@ from gi.repository import Gtk as gtk
 from gi.repository import Gdk as gdk
 from gi.repository import AppIndicator3 as appindicator
 from gi.repository import Notify as notify
+
+logging.basicConfig(level=logging.ERROR)
 
 APPINDICATOR_ID = "sony-av-indicator"
 
@@ -31,24 +41,21 @@ MEDIUM_VOLUME = 30
 MAX_VOLUME = 45
 ICON_PATH = "/usr/share/icons/ubuntu-mono-dark/status/24"
 
-SOURCE_NAMES = [ "bdDvd", "game", "satCaTV", "video", "tv", "saCd", "fmTuner", "usb", "bluetooth" ]
+SOURCE_NAMES = [ "bdDvd", "game", "satCaTV", "video", "tv", "saCd", "fmTuner", "bluetooth", "usb", "homeNetwork", "screenMirroring" ]
 SOUND_FIELD_NAMES = [ "twoChannelStereo", "aDirect", "multiStereo", "afd", "pl2Movie", "neo6Cinema", "hdDcs", "pl2Music", "neo6Music", "concertHallA", "concertHallB", "concertHallC", "jazzClub", "liveConcert", "stadium", "sports", "portableAudio" ]
 
-CMD_MIN_VOLUME =  bytearray([0x02, 0x06, 0xA0, 0x52, 0x00, 0x03, 0x00, 0x00, 0x00])
-CMD_MAX_VOLUME =  bytearray([0x02, 0x06, 0xA0, 0x52, 0x00, 0x03, 0x00, 0x4A, 0x00])
-CMD_MUTE =        bytearray([0x02, 0x04, 0xA0, 0x53, 0x00, 0x01, 0x00])
-CMD_UNMUTE =      bytearray([0x02, 0x04, 0xA0, 0x53, 0x00, 0x00, 0x00])
-
 CMD_SOURCE_MAP = {
-    "bdDvd":      bytearray([0x02, 0x04, 0xA0, 0x42, 0x00, 0x1b, 0x00]),
-    "game":       bytearray([0x02, 0x04, 0xA0, 0x42, 0x00, 0x1c, 0x00]),
-    "satCaTV":    bytearray([0x02, 0x04, 0xA0, 0x42, 0x00, 0x16, 0x00]),
-    "video":      bytearray([0x02, 0x04, 0xA0, 0x42, 0x00, 0x10, 0x00]),
-    "tv":         bytearray([0x02, 0x04, 0xA0, 0x42, 0x00, 0x1a, 0x00]),
-    "saCd":       bytearray([0x02, 0x04, 0xA0, 0x42, 0x00, 0x02, 0x00]),
-    "fmTuner":    bytearray([0x02, 0x04, 0xA0, 0x42, 0x00, 0x2e, 0x00]),
-    "usb":        bytearray([0x02, 0x04, 0xA0, 0x42, 0x00, 0x34, 0x00]),
-    "bluetooth":  bytearray([0x02, 0x04, 0xA0, 0x42, 0x00, 0x34, 0x00])
+    "bdDvd":            bytearray([0x02, 0x04, 0xA0, 0x42, 0x00, 0x1b, 0x00]),
+    "game":             bytearray([0x02, 0x04, 0xA0, 0x42, 0x00, 0x1c, 0x00]),
+    "satCaTV":          bytearray([0x02, 0x04, 0xA0, 0x42, 0x00, 0x16, 0x00]),
+    "video":            bytearray([0x02, 0x04, 0xA0, 0x42, 0x00, 0x10, 0x00]),
+    "tv":               bytearray([0x02, 0x04, 0xA0, 0x42, 0x00, 0x1a, 0x00]),
+    "saCd":             bytearray([0x02, 0x04, 0xA0, 0x42, 0x00, 0x02, 0x00]),
+    "fmTuner":          bytearray([0x02, 0x04, 0xA0, 0x42, 0x00, 0x2e, 0x00]),
+    "bluetooth":        bytearray([0x02, 0x04, 0xA0, 0x42, 0x00, 0x33, 0x00]),
+    "usb":              bytearray([0x02, 0x04, 0xA0, 0x42, 0x00, 0x34, 0x00]),
+    "homeNetwork":      bytearray([0x02, 0x04, 0xA0, 0x42, 0x00, 0x3d, 0x00]),
+    "screenMirroring":  bytearray([0x02, 0x04, 0xA0, 0x42, 0x00, 0x40, 0x00]),
 }
 
 # TODO: find out OPCODES for sound fields
@@ -72,13 +79,20 @@ CMD_SOUND_FIELD_MAP = {
     "portableAudio":    bytearray([0x02, 0x04, 0xAB, 0x82, 0x30, 0x00]),
 }
 
+CMD_MIN_VOLUME =  bytearray([0x02, 0x06, 0xA0, 0x52, 0x00, 0x03, 0x00, 0x00, 0x00])
+CMD_MAX_VOLUME =  bytearray([0x02, 0x06, 0xA0, 0x52, 0x00, 0x03, 0x00, 0x4A, 0x00])
+CMD_MUTE =        bytearray([0x02, 0x04, 0xA0, 0x53, 0x00, 0x01, 0x00])
+CMD_UNMUTE =      bytearray([0x02, 0x04, 0xA0, 0x53, 0x00, 0x00, 0x00])
+
 # FEEDBACK_POWER_ON =     bytearray([0x02, 0x07, 0xA8, 0x82, 0x00, 0x2E, 0x00, 0x10, 0x00])
 FEEDBACK_POWER_OFF =    bytearray([0x02, 0x07, 0xA8, 0x82, 0x00, 0x2E, 0x00, 0x10, 0x00])
 
-FEEDBACK_VOLUME =       bytearray([0x02, 0x06, 0xA8, 0x8b, 0x00, 0x03, 0x00])
-FEEDBACK_MUTE =         bytearray([0x02, 0x07, 0xA8, 0x82, 0x00, 0x2E, 0x00, 0x13, 0x00])
-FEEDBACK_UNMUTE =       bytearray([0x02, 0x07, 0xA8, 0x82, 0x00, 0x2E, 0x00, 0x11, 0x00])
+FEEDBACK_TIMER_PREFIX = bytearray([0x02, 0x05, 0xA8, 0x90])
+FEEDBACK_TIMER_SET =    bytearray([0x00])
+FEEDBACK_TIMER_UPDATE = bytearray([0x3B])
+FEEDBACK_TIMER_OFF =    bytearray([0xFF])
 
+# "video" == Google Cast + Bluetooth
 FEEDBACK_SOURCE_MAP = {
     "bdDvd":            bytearray([0x02, 0x07, 0xA8, 0x82, 0x00, 0x1B, 0x00, 0x11, 0x00]),
     "game":             bytearray([0x02, 0x07, 0xA8, 0x82, 0x00, 0x1C, 0x00, 0x11, 0x00]),
@@ -87,8 +101,10 @@ FEEDBACK_SOURCE_MAP = {
     "tv":               bytearray([0x02, 0x07, 0xA8, 0x82, 0x00, 0x1A, 0x00, 0x11, 0x00]),
     "saCd":             bytearray([0x02, 0x07, 0xA8, 0x82, 0x00, 0x02, 0x00, 0x11, 0x00]),
     "fmTuner":          bytearray([]),
+    "bluetooth":        bytearray([0x02, 0x07, 0xA8, 0x82, 0x00, 0x33, 0x00, 0x11, 0x00]),
     "usb":              bytearray([0x02, 0x07, 0xA8, 0x82, 0x00, 0x34, 0x00, 0x11, 0x00]),
-    "bluetooth":        bytearray([0x02, 0x07, 0xA8, 0x82, 0x00, 0x33, 0x00, 0x11, 0x00])
+    "homeNetwork":      bytearray([0x02, 0x07, 0xA8, 0x82, 0x00, 0x3d, 0x00, 0x11, 0x00]),
+    "screenMirroring":  bytearray([0x02, 0x07, 0xA8, 0x82, 0x00, 0x40, 0x00, 0x11, 0x00]),
 }
 
 FEEDBACK_SOUND_FIELD_MAP = {
@@ -111,6 +127,14 @@ FEEDBACK_SOUND_FIELD_MAP = {
     "portableAudio":    bytearray([0x02, 0x04, 0xAB, 0x82, 0x30, 0x00]),
 }
 
+FEEDBACK_PURE_DIRECT_ON  = bytearray([0x02, 0x03, 0xAB, 0x98, 0x01])
+FEEDBACK_PURE_DIRECT_OFF = bytearray([0x02, 0x03, 0xAB, 0x98, 0x00])
+
+FEEDBACK_VOLUME =       bytearray([0x02, 0x06, 0xA8, 0x8b, 0x00, 0x03, 0x00])
+FEEDBACK_MUTE =         bytearray([0x02, 0x07, 0xA8, 0x82, 0x00, 0x2E, 0x00, 0x13, 0x00])
+FEEDBACK_UNMUTE =       bytearray([0x02, 0x07, 0xA8, 0x82, 0x00, 0x2E, 0x00, 0x11, 0x00])
+
+
 SOURCE_MENU_MAP = {
     "bdDvd": "Blueray / DVD",
     "game": "Game",
@@ -119,8 +143,10 @@ SOURCE_MENU_MAP = {
     "tv": "TV",
     "saCd": "CD",
     "fmTuner": "FM Tuner",
+    "bluetooth": "Bluetooth",
     "usb": "USB",
-    "bluetooth": "Bluetooth"
+    "homeNetwork": "Home Network",
+    "screenMirroring": "Screen Mirroring",
 }
 
 SOUND_FIELD_MENU_MAP = {
@@ -145,8 +171,13 @@ SOUND_FIELD_MENU_MAP = {
 
 
 current_power = True
+current_timer = False
+timer_hours = 0
+timer_minutes = 0
+current_power = True
 current_source = "satCaTV"
 current_sound_field = "twoChannelStereo"
+current_pure_direct = False
 current_volume = LOW_VOLUME
 muted = False
 
@@ -155,8 +186,10 @@ slide_speed = 0.05
 scroll_speed = 0.1
 
 show_power_notifications = True
+show_timer_notifications = True
 show_source_notifications = True
 show_sound_field_notifications = False
+show_pure_direct_notifications = True
 show_volume_notifications = False
 
 _indicator = None
@@ -191,6 +224,24 @@ def update_power(power):
             _notification.update("<b>Power OFF</b>", "", None)
             _notification.show()
 
+def update_timer(hours, minutes, set_timer, was_updated):
+    global current_timer
+    global timer_hours
+    global timer_minutes
+    current_timer = True
+    timer_hours = hours
+    timer_minutes = minutes
+    if show_timer_notifications:
+        if not set_timer:
+            _notification.update("<b>Timer OFF</b>", "", None)
+            _notification.show()
+        elif not was_updated:
+            _notification.update("<b>Timer SET</b>", "Device will shutdown in %s:%s h"%(hours, minutes), None)
+            _notification.show()
+        elif minutes < 35:
+            _notification.update("<b>Timer</b>", "Device will shutdown in %s:%s h"%(hours, minutes), None)
+            _notification.show()
+
 def update_source(source_name):
     global current_power
     current_source = source_name
@@ -215,6 +266,17 @@ def select_sound_field(source, sound_field_name):
     send_command(CMD_SOUND_FIELD_MAP[sound_field_name])
     update_sound_field(sound_field_name)
 
+def update_pure_direct(pure_direct):
+    global current_pure_direct
+    current_pure_direct = pure_direct
+    if show_pure_direct_notifications:
+        print "Pure Direct:", pure_direct
+        if pure_direct:
+            _notification.update("<b>Pure Direct ON</b>", "", None)
+            _notification.show()
+        else:
+            _notification.update("<b>Pure Direct OFF</b>", "", None)
+            _notification.show()
 
 def get_volume_icon(vol):
     if muted:
@@ -388,6 +450,7 @@ def quit(source):
 class FeedbackWatcher(threading.Thread):
 
     _ended = False
+    _socket = None
 
     def __init__(self):
         threading.Thread.__init__(self)
@@ -398,9 +461,21 @@ class FeedbackWatcher(threading.Thread):
     def check_power(self, data):
         if FEEDBACK_POWER_OFF == data:
             update_power(False)
-        else:
-            return False
-        return True
+            return True
+        return False
+
+    def check_timer(self, data):
+        if FEEDBACK_TIMER_PREFIX == data[:-3]:
+            if FEEDBACK_TIMER_SET == data[-1]:
+                update_timer(ord(data[-3]), ord(data[-2]), True, False)
+                return True
+            elif FEEDBACK_TIMER_UPDATE == data[-1]:
+                update_timer(ord(data[-3]), ord(data[-2]), True, True)
+                return True
+            elif FEEDBACK_TIMER_OFF == data[-1]:
+                update_timer(ord(data[-3]), ord(data[-2]), False, False)
+                return True
+        return False
 
     def check_source(self, data):
         source_switched = False
@@ -421,6 +496,15 @@ class FeedbackWatcher(threading.Thread):
                 sound_field_switched = True
         return sound_field_switched
 
+    def check_pure_direct(self, data):
+        if FEEDBACK_PURE_DIRECT_ON == data:
+            update_pure_direct(True)
+        elif FEEDBACK_PURE_DIRECT_OFF == data:
+            update_pure_direct(False)
+        else:
+            return False
+        return True
+
     def check_volume(self, data):
         if FEEDBACK_VOLUME == data[:-1]:
             update_volume(ord(data[-1]))
@@ -432,23 +516,39 @@ class FeedbackWatcher(threading.Thread):
             return False
         return True
 
-    def debug_data(self, data):
-        print "Received unknown data:"
-        for i in data:
-            print hex(ord(i))
+    def debug_data(self, data, prepend_text="Received unknown data:\n"):
+        opcode = ", ".join([hex(ord(byte)) for byte in data])
+        print "%s%s" %(prepend_text, opcode)
+
+    def connect(self):
+        self._socket.connect((TCP_IP, TCP_PORT))
+        print "Connected"
+        
+    def reconnect(self):
+        self._socket.close()
+        self._socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self._socket.connect((TCP_IP, TCP_PORT))
+        print "Reconnected"
 
     def run(self):
-        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        # s.settimeout(0.2)
-        s.connect((TCP_IP, TCP_PORT))
+        self._socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        # _socket.settimeout(0.2)
+        self.connect()
         while not self._ended:
             try:
-                data = s.recv(BUFFER_SIZE)
-                if not self.check_power(data) and not self.check_source(data) and not self.check_sound_field(data) and not self.check_volume(data):
+                data = self._socket.recv(BUFFER_SIZE)
+                if not self.check_power(data) and \
+                   not self.check_timer(data) and \
+                   not self.check_source(data) and \
+                   not self.check_sound_field(data) and \
+                   not self.check_pure_direct(data) and \
+                   not self.check_volume(data):
                     self.debug_data(data)
-            except:
-                pass
-        s.close()
+            except Exception as e:
+                print "Socket read error", e
+                self.reconnect()
+        self._socket.close()
+        print "Connection closed"
 
 def watch_feedback():
     global _feedback_watcher_thread
