@@ -55,19 +55,27 @@ FEEDBACK_UNMUTE = bytearray([0x02, 0x07, 0xA8, 0x82, 0x00, 0x2E, 0x00, 0x11, 0x0
 FEEDBACK_UNK_1 =  bytearray([0x02, 0x07, 0xA8, 0x82, 0x00, 0x33, 0x00, 0x11, 0x00])
 FEEDBACK_UNK_2 =  bytearray([0x02, 0x07, 0xA8, 0x82, 0x00, 0x02, 0x00, 0x11, 0x00])
 
-FEEDBACK_SOURCE_MAP = {
-    "bdDvd":      bytearray([0x02, 0x04, 0xAB, 0x82, 0x33, 0x00]),
-    "game":       bytearray([0x02, 0x04, 0xAB, 0x82, 0x23, 0x00]),
-    "satCaTV":    bytearray([0x02, 0x04, 0xAB, 0x82, 0x00, 0x00]),
-    "video":      bytearray([0x02, 0x04, 0xAB, 0x82, 0x21, 0x00]),
-    "tv":         bytearray([0x02, 0x04, 0xAB, 0x82, 0x21, 0x00]),
-    "saCd":       bytearray([0x02, 0x04, 0xAB, 0x82, 0x27, 0x00]),
-    "fmTuner":    bytearray([0x02, 0x04, 0xAB, 0x82, 0x27, 0x00]),
-    "usb":        bytearray([0x02, 0x04, 0xAB, 0x82, 0x24, 0x00]),
-    "bluetooth":  bytearray([])
+FEEDBACK_SOUND_FIELD_MAP = {
+    "twoChannelStereo": bytearray([0x02, 0x04, 0xAB, 0x82, 0x00, 0x00]),
+    "aDirect":          bytearray([0x02, 0x04, 0xAB, 0x82, 0x02, 0x00]),
+    "multiStereo":      bytearray([0x02, 0x04, 0xAB, 0x82, 0x27, 0x00]),
+    "afd":              bytearray([0x02, 0x04, 0xAB, 0x82, 0x21, 0x00]),
+    "pl2Movie":         bytearray([0x02, 0x04, 0xAB, 0x82, 0x23, 0x00]),
+    "neo6Cinema":       bytearray([0x02, 0x04, 0xAB, 0x82, 0x25, 0x00]),
+    "hdDcs":            bytearray([0x02, 0x04, 0xAB, 0x82, 0x33, 0x00]),
+    "pl2Music":         bytearray([0x02, 0x04, 0xAB, 0x82, 0x24, 0x00]),
+    "neo6Music":        bytearray([0x02, 0x04, 0xAB, 0x82, 0x26, 0x00]),
+    "concertHallA":     bytearray([0x02, 0x04, 0xAB, 0x82, 0x1E, 0x00]),
+    "concertHallB":     bytearray([0x02, 0x04, 0xAB, 0x82, 0x1F, 0x00]),
+    "concertHallC":     bytearray([0x02, 0x04, 0xAB, 0x82, 0x38, 0x00]),
+    "jazzClub":         bytearray([0x02, 0x04, 0xAB, 0x82, 0x16, 0x00]),
+    "liveConcert":      bytearray([0x02, 0x04, 0xAB, 0x82, 0x19, 0x00]),
+    "stadium":          bytearray([0x02, 0x04, 0xAB, 0x82, 0x1B, 0x00]),
+    "sports":           bytearray([0x02, 0x04, 0xAB, 0x82, 0x20, 0x00]),
+    "portableAudio":    bytearray([0x02, 0x04, 0xAB, 0x82, 0x30, 0x00]),
 }
 
-FEEDBACK_SOURCE_MAP_2 = {
+FEEDBACK_SOURCE_MAP = {
     "bdDvd":      bytearray([0x02, 0x07, 0xA8, 0x82, 0x00, 0x1B, 0x00, 0x11, 0x00]),
     "game":       bytearray([0x02, 0x07, 0xA8, 0x82, 0x00, 0x1C, 0x00, 0x11, 0x00]),
     "satCaTV":    bytearray([0x02, 0x07, 0xA8, 0x82, 0x00, 0x16, 0x00, 0x11, 0x00]),
@@ -293,9 +301,17 @@ class FeedbackWatcher(threading.Thread):
             # print source_feedback
             # print data
             if source_feedback == data:
-                print "Switched to source: ", source_name
+                print "Switched source: ", source_name
                 source_switched = True
         return source_switched
+
+    def check_sound_field(self, data):
+        sound_field_switched = False
+        for sound_field_name, sound_field_feedback in FEEDBACK_SOUND_FIELD_MAP.iteritems():
+            if sound_field_feedback == data:
+                print "Switched sound field: ", sound_field_name
+                sound_field_switched = True
+        return sound_field_switched
 
     def print_data(self, data):
         print "Received unknown data:", data
@@ -303,17 +319,17 @@ class FeedbackWatcher(threading.Thread):
             print hex(ord(i))
 
     def run(self):
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        # s.settimeout(0.2)
+        s.connect((TCP_IP, TCP_PORT))
         while not self._ended:
             try:
-                s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                s.settimeout(0.2)
-                s.connect((TCP_IP, TCP_PORT))
                 data = s.recv(BUFFER_SIZE)
-                s.close()
-                if not self.check_volume(data) and not self.check_source(data):
+                if not self.check_volume(data) and not self.check_source(data) and not self.check_sound_field(data):
                     self.print_data(data)
             except:
                 pass
+        s.close()
 
 def watch_feedback():
     global _feedback_watcher_thread
