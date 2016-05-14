@@ -11,11 +11,13 @@ import os
 import threading
 
 gi.require_version("Gtk", "3.0")
+gi.require_version("AppIndicator3", "0.1")
+gi.require_version('Notify', '0.7')
+
 from gi.repository import Gtk as gtk
 from gi.repository import Gdk as gdk
-gi.require_version("AppIndicator3", "0.1")
 from gi.repository import AppIndicator3 as appindicator
-
+from gi.repository import Notify as notify
 
 APPINDICATOR_ID = "sony-av-indicator"
 
@@ -30,12 +32,13 @@ MAX_VOLUME = 45
 ICON_PATH = "/usr/share/icons/ubuntu-mono-dark/status/24"
 
 SOURCE_NAMES = [ "bdDvd", "game", "satCaTV", "video", "tv", "saCd", "fmTuner", "usb", "bluetooth" ]
+SOUND_FIELD_NAMES = [ "twoChannelStereo", "aDirect", "multiStereo", "afd", "pl2Movie", "neo6Cinema", "hdDcs", "pl2Music", "neo6Music", "concertHallA", "concertHallB", "concertHallC", "jazzClub", "liveConcert", "stadium", "sports", "portableAudio" ]
 
 CMD_MIN_VOLUME =  bytearray([0x02, 0x06, 0xA0, 0x52, 0x00, 0x03, 0x00, 0x00, 0x00])
 CMD_MAX_VOLUME =  bytearray([0x02, 0x06, 0xA0, 0x52, 0x00, 0x03, 0x00, 0x4A, 0x00])
-
 CMD_MUTE =        bytearray([0x02, 0x04, 0xA0, 0x53, 0x00, 0x01, 0x00])
 CMD_UNMUTE =      bytearray([0x02, 0x04, 0xA0, 0x53, 0x00, 0x00, 0x00])
+
 CMD_SOURCE_MAP = {
     "bdDvd":      bytearray([0x02, 0x04, 0xA0, 0x42, 0x00, 0x1b, 0x00]),
     "game":       bytearray([0x02, 0x04, 0xA0, 0x42, 0x00, 0x1c, 0x00]),
@@ -48,12 +51,45 @@ CMD_SOURCE_MAP = {
     "bluetooth":  bytearray([0x02, 0x04, 0xA0, 0x42, 0x00, 0x34, 0x00])
 }
 
-FEEDBACK_VOLUME = bytearray([0x02, 0x06, 0xA8, 0x8b, 0x00, 0x03, 0x00])
-FEEDBACK_MUTE =   bytearray([0x02, 0x07, 0xA8, 0x82, 0x00, 0x2E, 0x00, 0x13, 0x00])
-FEEDBACK_UNMUTE = bytearray([0x02, 0x07, 0xA8, 0x82, 0x00, 0x2E, 0x00, 0x11, 0x00])
+# TODO: find out OPCODES for sound fields
+CMD_SOUND_FIELD_MAP = {
+    "twoChannelStereo": bytearray([0x02, 0x04, 0xAB, 0x82, 0x00, 0x00]),
+    "aDirect":          bytearray([0x02, 0x04, 0xAB, 0x82, 0x02, 0x00]),
+    "multiStereo":      bytearray([0x02, 0x04, 0xAB, 0x82, 0x27, 0x00]),
+    "afd":              bytearray([0x02, 0x04, 0xAB, 0x82, 0x21, 0x00]),
+    "pl2Movie":         bytearray([0x02, 0x04, 0xAB, 0x82, 0x23, 0x00]),
+    "neo6Cinema":       bytearray([0x02, 0x04, 0xAB, 0x82, 0x25, 0x00]),
+    "hdDcs":            bytearray([0x02, 0x04, 0xAB, 0x82, 0x33, 0x00]),
+    "pl2Music":         bytearray([0x02, 0x04, 0xAB, 0x82, 0x24, 0x00]),
+    "neo6Music":        bytearray([0x02, 0x04, 0xAB, 0x82, 0x26, 0x00]),
+    "concertHallA":     bytearray([0x02, 0x04, 0xAB, 0x82, 0x1E, 0x00]),
+    "concertHallB":     bytearray([0x02, 0x04, 0xAB, 0x82, 0x1F, 0x00]),
+    "concertHallC":     bytearray([0x02, 0x04, 0xAB, 0x82, 0x38, 0x00]),
+    "jazzClub":         bytearray([0x02, 0x04, 0xAB, 0x82, 0x16, 0x00]),
+    "liveConcert":      bytearray([0x02, 0x04, 0xAB, 0x82, 0x19, 0x00]),
+    "stadium":          bytearray([0x02, 0x04, 0xAB, 0x82, 0x1B, 0x00]),
+    "sports":           bytearray([0x02, 0x04, 0xAB, 0x82, 0x20, 0x00]),
+    "portableAudio":    bytearray([0x02, 0x04, 0xAB, 0x82, 0x30, 0x00]),
+}
 
-FEEDBACK_UNK_1 =  bytearray([0x02, 0x07, 0xA8, 0x82, 0x00, 0x33, 0x00, 0x11, 0x00])
-FEEDBACK_UNK_2 =  bytearray([0x02, 0x07, 0xA8, 0x82, 0x00, 0x02, 0x00, 0x11, 0x00])
+# FEEDBACK_POWER_ON =     bytearray([0x02, 0x07, 0xA8, 0x82, 0x00, 0x2E, 0x00, 0x10, 0x00])
+FEEDBACK_POWER_OFF =    bytearray([0x02, 0x07, 0xA8, 0x82, 0x00, 0x2E, 0x00, 0x10, 0x00])
+
+FEEDBACK_VOLUME =       bytearray([0x02, 0x06, 0xA8, 0x8b, 0x00, 0x03, 0x00])
+FEEDBACK_MUTE =         bytearray([0x02, 0x07, 0xA8, 0x82, 0x00, 0x2E, 0x00, 0x13, 0x00])
+FEEDBACK_UNMUTE =       bytearray([0x02, 0x07, 0xA8, 0x82, 0x00, 0x2E, 0x00, 0x11, 0x00])
+
+FEEDBACK_SOURCE_MAP = {
+    "bdDvd":            bytearray([0x02, 0x07, 0xA8, 0x82, 0x00, 0x1B, 0x00, 0x11, 0x00]),
+    "game":             bytearray([0x02, 0x07, 0xA8, 0x82, 0x00, 0x1C, 0x00, 0x11, 0x00]),
+    "satCaTV":          bytearray([0x02, 0x07, 0xA8, 0x82, 0x00, 0x16, 0x00, 0x11, 0x00]),
+    "video":            bytearray([0x02, 0x07, 0xA8, 0x82, 0x00, 0xFF, 0x00, 0x11, 0x00]),
+    "tv":               bytearray([0x02, 0x07, 0xA8, 0x82, 0x00, 0x1A, 0x00, 0x11, 0x00]),
+    "saCd":             bytearray([0x02, 0x07, 0xA8, 0x82, 0x00, 0x02, 0x00, 0x11, 0x00]),
+    "fmTuner":          bytearray([]),
+    "usb":              bytearray([0x02, 0x07, 0xA8, 0x82, 0x00, 0x34, 0x00, 0x11, 0x00]),
+    "bluetooth":        bytearray([0x02, 0x07, 0xA8, 0x82, 0x00, 0x33, 0x00, 0x11, 0x00])
+}
 
 FEEDBACK_SOUND_FIELD_MAP = {
     "twoChannelStereo": bytearray([0x02, 0x04, 0xAB, 0x82, 0x00, 0x00]),
@@ -75,18 +111,6 @@ FEEDBACK_SOUND_FIELD_MAP = {
     "portableAudio":    bytearray([0x02, 0x04, 0xAB, 0x82, 0x30, 0x00]),
 }
 
-FEEDBACK_SOURCE_MAP = {
-    "bdDvd":      bytearray([0x02, 0x07, 0xA8, 0x82, 0x00, 0x1B, 0x00, 0x11, 0x00]),
-    "game":       bytearray([0x02, 0x07, 0xA8, 0x82, 0x00, 0x1C, 0x00, 0x11, 0x00]),
-    "satCaTV":    bytearray([0x02, 0x07, 0xA8, 0x82, 0x00, 0x16, 0x00, 0x11, 0x00]),
-    "video":      bytearray([0x02, 0x07, 0xA8, 0x82, 0x00, 0xFF, 0x00, 0x11, 0x00]),
-    "tv":         bytearray([0x02, 0x07, 0xA8, 0x82, 0x00, 0x1A, 0x00, 0x11, 0x00]),
-    "saCd":       bytearray([0x02, 0x07, 0xA8, 0x82, 0x00, 0x02, 0x00, 0x11, 0x00]),
-    "fmTuner":    bytearray([]),
-    "usb":        bytearray([0x02, 0x07, 0xA8, 0x82, 0x00, 0x34, 0x00, 0x11, 0x00]),
-    "bluetooth":  bytearray([0x02, 0x07, 0xA8, 0x82, 0x00, 0x33, 0x00, 0x11, 0x00])
-}
-
 SOURCE_MENU_MAP = {
     "bdDvd": "Blueray / DVD",
     "game": "Game",
@@ -99,14 +123,45 @@ SOURCE_MENU_MAP = {
     "bluetooth": "Bluetooth"
 }
 
+SOUND_FIELD_MENU_MAP = {
+    "twoChannelStereo": "2 Channels",
+    "aDirect": "A Direct",
+    "multiStereo": "Multi Stereo",
+    "afd": "A.F.D.",
+    "pl2Movie": "PL-II Movie",
+    "neo6Cinema": "Neo 6: Cinema",
+    "hdDcs": "HD DCS",
+    "pl2Music": "PL-II Music",
+    "neo6Music": "Neo 6: Music",
+    "concertHallA": "Concert Hall A",
+    "concertHallB": "Concert Hall B",
+    "concertHallC": "Concert Hall C",
+    "jazzClub": "Jazz Club",
+    "liveConcert": "Live Concert",
+    "stadium": "Stadium",
+    "sports": "Sports",
+    "portableAudio": "Portable Audio"
+}
 
+
+current_power = True
+current_source = "satCaTV"
+current_sound_field = "twoChannelStereo"
 current_volume = LOW_VOLUME
+muted = False
+
 scroll_volume = 2
 slide_speed = 0.05
 scroll_speed = 0.1
-muted = False
+
+show_power_notifications = True
+show_source_notifications = True
+show_sound_field_notifications = False
+show_volume_notifications = False
+
 _indicator = None
 _watcher_thread = None
+_notification = notify.Notification.new("")
 
 
 def connect():
@@ -123,8 +178,43 @@ def send_command(cmd):
     s.send(cmd)
     s.close()
 
+
+def update_power(power):
+    global current_power
+    current_power = power
+    if show_power_notifications:
+        print "Power state:", power
+        if power:
+            _notification.update("<b>Power ON</b>", "", None)
+            _notification.show()
+        else:
+            _notification.update("<b>Power OFF</b>", "", None)
+            _notification.show()
+
+def update_source(source_name):
+    global current_power
+    current_source = source_name
+    if show_source_notifications:
+        print "Switched source:", source_name
+        _notification.update("<b>Source</b>", SOURCE_MENU_MAP[source_name], None)
+        _notification.show()
+
 def select_source(source, source_name):
     send_command(CMD_SOURCE_MAP[source_name])
+    update_source(source_name)
+
+
+def update_sound_field(sound_field_name):
+    current_sound_field = sound_field_name
+    if show_sound_field_notifications:
+        print "Switched sound field:", sound_field_name
+        _notification.update("<b>Sound Field</b>", SOUND_FIELD_MENU_MAP[sound_field_name], None)
+        _notification.show()
+
+def select_sound_field(source, sound_field_name):
+    send_command(CMD_SOUND_FIELD_MAP[sound_field_name])
+    update_sound_field(sound_field_name)
+
 
 def get_volume_icon(vol):
     if muted:
@@ -152,12 +242,21 @@ def update_volume(vol):
         muted = False
     current_volume = vol
     set_volume_icon(vol)
-    print "volume ", current_volume
+    if show_volume_notifications:
+        print "Volume ", vol
 
 def update_muted(_muted):
     global muted
+    global current_notification
     muted = _muted
     set_volume_icon(current_volume)
+    if show_volume_notifications:
+        if muted:
+            _notification.update("<b>Muted</b>", "", get_volume_icon_path("audio-volume-muted-panel"))
+            _notification.show()
+        else:
+            _notification.update("<b>Unmuted</b>", "", get_volume_icon_path(get_volume_icon(current_volume)))
+            _notification.show()
 
 def set_volume(source, vol):
     cmd = bytearray([0x02, 0x06, 0xA0, 0x52, 0x00, 0x03, 0x00, vol, 0x00])
@@ -220,6 +319,7 @@ def toggle_mute(source):
     else:
         mute(source)
 
+
 def scroll(indicator, steps, direction):
     if direction == gdk.ScrollDirection.DOWN:
         scroll_volume_down()
@@ -229,6 +329,7 @@ def scroll(indicator, steps, direction):
         scroll_volume_up()
     elif direction == gdk.ScrollDirection.RIGHT:
         scroll_volume_up()
+
 
 def build_menu(indicator):
     menu = gtk.Menu()
@@ -241,6 +342,15 @@ def build_menu(indicator):
         item_select_source.connect("activate", select_source, source_name)
         sources_menu.append(item_select_source)
     menu.append(item_sources)
+
+    sound_field_menu = gtk.Menu()
+    item_sound_field = gtk.MenuItem("Sound Field")
+    item_sound_field.set_submenu(sound_field_menu)
+    for sound_field_name in SOUND_FIELD_NAMES:
+        item_select_sound_field = gtk.MenuItem(SOUND_FIELD_MENU_MAP[sound_field_name])
+        item_select_sound_field.connect("activate", select_sound_field, sound_field_name)
+        sound_field_menu.append(item_select_sound_field)
+    menu.append(item_sound_field)
 
     volume_menu = gtk.Menu()
     item_volume = gtk.MenuItem("Volume")
@@ -268,10 +378,12 @@ def build_menu(indicator):
     menu.show_all()
     return menu
 
+
 def quit(source):
     _feedback_watcher_thread.kill()
     _feedback_watcher_thread.join(8)
     gtk.main_quit()
+
 
 class FeedbackWatcher(threading.Thread):
 
@@ -282,6 +394,32 @@ class FeedbackWatcher(threading.Thread):
 
     def kill(self):
         self._ended = True
+
+    def check_power(self, data):
+        if FEEDBACK_POWER_OFF == data:
+            update_power(False)
+        else:
+            return False
+        return True
+
+    def check_source(self, data):
+        source_switched = False
+        for source_name, source_feedback in FEEDBACK_SOURCE_MAP.iteritems():
+            # print source_name
+            # print source_feedback
+            # print data
+            if source_feedback == data:
+                update_source(source_name)
+                source_switched = True
+        return source_switched
+
+    def check_sound_field(self, data):
+        sound_field_switched = False
+        for sound_field_name, sound_field_feedback in FEEDBACK_SOUND_FIELD_MAP.iteritems():
+            if sound_field_feedback == data:
+                update_sound_field(sound_field_name)
+                sound_field_switched = True
+        return sound_field_switched
 
     def check_volume(self, data):
         if FEEDBACK_VOLUME == data[:-1]:
@@ -294,27 +432,8 @@ class FeedbackWatcher(threading.Thread):
             return False
         return True
 
-    def check_source(self, data):
-        source_switched = False
-        for source_name, source_feedback in FEEDBACK_SOURCE_MAP.iteritems():
-            # print source_name
-            # print source_feedback
-            # print data
-            if source_feedback == data:
-                print "Switched source: ", source_name
-                source_switched = True
-        return source_switched
-
-    def check_sound_field(self, data):
-        sound_field_switched = False
-        for sound_field_name, sound_field_feedback in FEEDBACK_SOUND_FIELD_MAP.iteritems():
-            if sound_field_feedback == data:
-                print "Switched sound field: ", sound_field_name
-                sound_field_switched = True
-        return sound_field_switched
-
-    def print_data(self, data):
-        print "Received unknown data:", data
+    def debug_data(self, data):
+        print "Received unknown data:"
         for i in data:
             print hex(ord(i))
 
@@ -325,8 +444,8 @@ class FeedbackWatcher(threading.Thread):
         while not self._ended:
             try:
                 data = s.recv(BUFFER_SIZE)
-                if not self.check_volume(data) and not self.check_source(data) and not self.check_sound_field(data):
-                    self.print_data(data)
+                if not self.check_power(data) and not self.check_source(data) and not self.check_sound_field(data) and not self.check_volume(data):
+                    self.debug_data(data)
             except:
                 pass
         s.close()
@@ -336,16 +455,21 @@ def watch_feedback():
     _feedback_watcher_thread = FeedbackWatcher()
     _feedback_watcher_thread.start()
 
+
 def main():
+    global _indicator
+    global _notification
     indicator = appindicator.Indicator.new(APPINDICATOR_ID, get_volume_icon_path(get_volume_icon(current_volume)), appindicator.IndicatorCategory.SYSTEM_SERVICES)
     indicator.set_status(appindicator.IndicatorStatus.ACTIVE)
     indicator.set_menu(build_menu(indicator))
     indicator.connect("scroll-event", scroll)
-    global _indicator
+    notify.init(APPINDICATOR_ID)
+    _notification = notify.Notification.new("")
     _indicator = indicator
     signal.signal(signal.SIGINT, signal.SIG_DFL)
     watch_feedback()
     gtk.main()
+
 
 if __name__ == "__main__":
     main()
