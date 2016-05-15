@@ -2,10 +2,6 @@
 
 ## Configuration
 
-Adjust the IP address of your AVR:
-
-    TCP_IP = "xxx.xxx.xxx.xxx"
-
 Adjust the port of your AVR:
 
 * Port 8080 (STR-DA1800, STR-DN1030)
