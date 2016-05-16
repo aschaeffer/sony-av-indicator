@@ -1,7 +1,6 @@
 #!/usr/bin/env python
 
 # TODO: request states (source, field, volume, ...) during startup
-# TODO: source field commands
 
 __author__ = "andreasschaeffer"
 __author__ = "michaelkapuscik"
@@ -430,11 +429,19 @@ class CommandService():
     def send_command_w(self, widget, cmd):
         self.send_command(cmd)
 
+    def power_on(self):
+        self.send_command(CMD_POWER_ON)
+
+    def power_off(self):
+        self.send_command(CMD_POWER_OFF)
+
     def toggle_power(self, widget):
         if self.state_service.power:
-            self.send_command(CMD_POWER_OFF)
+            self.power_off()
+            self.state_service.update_power(False)
         else:
-            self.send_command(CMD_POWER_ON)
+            self.power_on()
+            self.state_service.update_power(True)
 
     def set_volume(self, widget, vol):
         cmd = bytearray([0x02, 0x06, 0xA0, 0x52, 0x00, 0x03, 0x00, vol, 0x00])
@@ -464,20 +471,48 @@ class CommandService():
     def toggle_mute(self, widget):
         if not self.state_service.power:
             self.toggle_power(widget)
-        if self.state_service.muted:
+        elif self.state_service.muted:
             self.unmute(widget)
         else:
             self.mute(widget)
 
-    def select_source(self, widget, source):
-        if self.initialized and self.state_service.source != source and widget.get_active():
+    def select_source(self, source):
+        if self.initialized and self.state_service.source != source:
             self.state_service.update_source(source)
             self.send_command(CMD_SOURCE_MAP[source])
 
-    def select_sound_field(self, widget, sound_field):
-        if self.initialized and self.state_service.sound_field != sound_field and widget.get_active():
+    def select_source_w(self, widget, source):
+        if widget.get_active():
+            self.select_source(source)
+
+    def source_up(self):
+        for i in range(len(SOURCE_NAMES)):
+            if self.state_service.source == SOURCE_NAMES[i]:
+                if i < len(SOURCE_NAMES) - 1:
+                    self.select_source(SOURCE_NAMES[i + 1])
+                    return
+                else:
+                    self.select_source(SOURCE_NAMES[0])
+                    return
+
+    def source_down(self):
+        for i in range(len(SOURCE_NAMES)):
+            if self.state_service.source == SOURCE_NAMES[i]:
+                if i > 0:
+                    self.select_source(SOURCE_NAMES[i - 1])
+                    return
+                else:
+                    self.select_source(SOURCE_NAMES[len(SOURCE_NAMES) - 1])
+                    return
+
+    def select_sound_field(self, sound_field):
+        if self.initialized and self.state_service.sound_field != sound_field:
             self.state_service.update_sound_field(sound_field)
             self.send_command(CMD_SOUND_FIELD_MAP[sound_field])
+
+    def select_sound_field_w(self, widget, sound_field):
+        if widget.get_active():
+            self.select_sound_field(sound_field)
 
     def set_fmtuner(self, widget, fmtuner):
         self.send_command(CMD_FMTUNER[fmtuner])
@@ -753,7 +788,7 @@ class SonyAvIndicator():
             if not self.state_service.power:
                 label = "Power Off"
             elif self.state_service.source == "fmTuner" and self.state_service.fmtuner != None:
-                label = "%s (%s)" %(SOURCE_MENU_MAP[self.state_service.source], self.state_service.fmtunerfreq)
+                label = "%s %s (%s)" %(SOURCE_MENU_MAP[self.state_service.source], self.state_service.fmtuner, self.state_service.fmtunerfreq)
             elif self.state_service.source != None:
                 label = SOURCE_MENU_MAP[self.state_service.source]
             else:
@@ -775,14 +810,12 @@ class SonyAvIndicator():
             if self.state_service.source == "fmTuner":
                 self.command_service.fmtuner_preset_down(None)
             else:
-                self.command_service.volume_up()
-                # TODO: switch source
+                self.command_service.source_up()
         elif direction == gdk.ScrollDirection.RIGHT:
             if self.state_service.source == "fmTuner":
                 self.command_service.fmtuner_preset_up(None)
             else:
-                self.command_service.volume_down()
-                # TODO: switch source
+                self.command_service.source_down()
 
     def build_menu(self):
         menu = gtk.Menu()
@@ -793,7 +826,7 @@ class SonyAvIndicator():
         for source in SOURCE_NAMES:
             item_select_source = gtk.RadioMenuItem.new_with_label(self.source_group, SOURCE_MENU_MAP[source])
             self.source_group = item_select_source.get_group()
-            item_select_source.connect("activate", self.command_service.select_source, source)
+            item_select_source.connect("activate", self.command_service.select_source_w, source)
             sources_menu.append(item_select_source)
             self.source_menu_items[source] = item_select_source
         menu.append(item_sources)
@@ -804,7 +837,7 @@ class SonyAvIndicator():
         for sound_field in SOUND_FIELD_NAMES:
             item_select_sound_field = gtk.RadioMenuItem.new_with_label(self.sound_field_group, SOUND_FIELD_MENU_MAP[sound_field])
             self.sound_field_group = item_select_sound_field.get_group()
-            item_select_sound_field.connect("activate", self.command_service.select_sound_field, sound_field)
+            item_select_sound_field.connect("activate", self.command_service.select_sound_field_w, sound_field)
             sound_field_menu.append(item_select_sound_field)
             self.sound_field_menu_items[sound_field] = item_select_sound_field
         menu.append(item_sound_field)
