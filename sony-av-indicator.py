@@ -93,8 +93,12 @@ CMD_MAX_VOLUME =        bytearray([0x02, 0x06, 0xA0, 0x52, 0x00, 0x03, 0x00, 0x4
 CMD_MUTE =              bytearray([0x02, 0x04, 0xA0, 0x53, 0x00, 0x01, 0x00])
 CMD_UNMUTE =            bytearray([0x02, 0x04, 0xA0, 0x53, 0x00, 0x00, 0x00])
 
-FEEDBACK_POWER_ON =     bytearray([0x02, 0x07, 0xA8, 0x82, 0x00, 0x2E, 0x00, 0x10, 0x00])
-FEEDBACK_POWER_OFF =    bytearray([0x02, 0x07, 0xA8, 0x82, 0x00, 0x16, 0x00, 0x10, 0x00])
+CMD_POWER_ON =          bytearray([0x02, 0x04, 0xA0, 0x60, 0x00, 0x01, 0x00])
+CMD_POWER_OFF =         bytearray([0x02, 0x04, 0xA0, 0x60, 0x00, 0x00, 0x00])
+
+#0x2, 0x7, 0xa8, 0x82, 0x0, 0x2e, 0x0, 0x10, 0x0
+#FEEDBACK_POWER_OFF =    bytearray([0x02, 0x07, 0xA8, 0x82, 0x00, 0x16, 0x00, 0x10, 0x00])
+#FEEDBACK_POWER_ON =     bytearray([0x02, 0x07, 0xA8, 0x82, 0x00, 0x2E, 0x00, 0x10, 0x00])
 
 FEEDBACK_TIMER_PREFIX = bytearray([0x02, 0x05, 0xA8, 0x90])
 FEEDBACK_TIMER_SET =    bytearray([0x00])
@@ -102,7 +106,7 @@ FEEDBACK_TIMER_UPDATE = bytearray([0x3B])
 FEEDBACK_TIMER_OFF =    bytearray([0xFF])
 
 # "video" == Google Cast + Bluetooth
-# two bytes follows
+# two bytes follows: power off / unmuted / muted
 FEEDBACK_SOURCE_MAP = {
     "bdDvd":            bytearray([0x02, 0x07, 0xA8, 0x82, 0x00, 0x1B, 0x00]),
     "game":             bytearray([0x02, 0x07, 0xA8, 0x82, 0x00, 0x1C, 0x00]),
@@ -116,6 +120,9 @@ FEEDBACK_SOURCE_MAP = {
     "homeNetwork":      bytearray([0x02, 0x07, 0xA8, 0x82, 0x00, 0x3D, 0x00]),
     "screenMirroring":  bytearray([0x02, 0x07, 0xA8, 0x82, 0x00, 0x40, 0x00]),
 }
+FEEDBACK_POWER_OFF =    bytearray([0x10])
+FEEDBACK_MUTE_OFF =     bytearray([0x11])
+FEEDBACK_MUTE_ON =      bytearray([0x13])
 
 FEEDBACK_SOUND_FIELD_MAP = {
     "twoChannelStereo": bytearray([0x02, 0x04, 0xAB, 0x82, 0x00, 0x00]),
@@ -151,8 +158,6 @@ FEEDBACK_FMTUNER_STEREO  = bytearray([0x00])
 FEEDBACK_FMTUNER_MONO    = bytearray([0x80])
 
 FEEDBACK_VOLUME =       bytearray([0x02, 0x06, 0xA8, 0x8b, 0x00, 0x03, 0x00])
-FEEDBACK_MUTE =         bytearray([0x13])
-FEEDBACK_UNMUTE =       bytearray([0x11])
 
 SOURCE_MENU_MAP = {
     "bdDvd": "Blueray / DVD",
@@ -291,11 +296,12 @@ class StateService():
         
     def update_power(self, power):
         if self.initialized:
+            changed = (power != self.power)
             self.power = power
             self.sony_av_indicator.update_label()
-            if self.debug["power"]:
+            if self.debug["power"] and changed:
                 print "Power state:", power
-            if self.notifications["power"]:
+            if self.notifications["power"] and changed:
                 if power:
                     self.sony_av_indicator.show_notification("<b>Power ON</b>", "", None)
                 else:
@@ -318,7 +324,7 @@ class StateService():
             changed = (muted != self.muted)
             self.muted = muted
             self.sony_av_indicator.set_volume_icon(self.volume)
-            if self.debug["muted"]:
+            if self.debug["muted"] and changed:
                 if self.muted:
                     print "Muted"
                 else:
@@ -424,6 +430,12 @@ class CommandService():
     def send_command_w(self, widget, cmd):
         self.send_command(cmd)
 
+    def toggle_power(self, widget):
+        if self.state_service.power:
+            self.send_command(CMD_POWER_OFF)
+        else:
+            self.send_command(CMD_POWER_ON)
+
     def set_volume(self, widget, vol):
         cmd = bytearray([0x02, 0x06, 0xA0, 0x52, 0x00, 0x03, 0x00, vol, 0x00])
         self.send_command(cmd)
@@ -450,6 +462,8 @@ class CommandService():
             self.state_service.update_muted(False)
 
     def toggle_mute(self, widget):
+        if not self.state_service.power:
+            self.toggle_power(widget)
         if self.state_service.muted:
             self.unmute(widget)
         else:
@@ -543,15 +557,6 @@ class FeedbackWatcher(threading.Thread):
         self.ended = True
         self.socket.shutdown(socket.SHUT_WR)
 
-    def check_power(self, data):
-        if FEEDBACK_POWER_OFF == data:
-            self.state_service.update_power(False)
-            return True
-        elif FEEDBACK_POWER_ON == data:
-            self.state_service.update_power(True)
-            return True
-        return False
-
     def check_volume(self, data):
         if FEEDBACK_VOLUME == data[:-1]:
             self.state_service.update_volume(ord(data[-1]))
@@ -564,11 +569,15 @@ class FeedbackWatcher(threading.Thread):
             if source_feedback == data[:-2]:
                 self.sony_av_indicator.update_source(source)
                 source_switched = True
-                # The command also contains the muted state
-                if FEEDBACK_MUTE == data[-2]: 
-                    self.state_service.update_muted(True)
-                elif FEEDBACK_UNMUTE == data[-2]:
+                # The command also contains the power and muted state
+                if FEEDBACK_POWER_OFF == data[-2]:
+                    self.state_service.update_power(False)
+                elif FEEDBACK_MUTE_OFF == data[-2]:
+                    self.state_service.update_power(True)
                     self.state_service.update_muted(False)
+                elif FEEDBACK_MUTE_ON == data[-2]:
+                    self.state_service.update_power(True)
+                    self.state_service.update_muted(True)
         return source_switched
 
     def check_sound_field(self, data):
@@ -643,8 +652,7 @@ class FeedbackWatcher(threading.Thread):
                 data = self.socket.recv(BUFFER_SIZE)
                 if self.debug_receive_commands and not self.ended:
                     self.debug_data(data)
-                if not self.check_power(data) and \
-                   not self.check_timer(data) and \
+                if not self.check_timer(data) and \
                    not self.check_source(data) and \
                    not self.check_sound_field(data) and \
                    not self.check_pure_direct(data) and \
@@ -826,6 +834,10 @@ class SonyAvIndicator():
         item_fmtuner_down.connect("activate", self.command_service.fmtuner_preset_down)
         fmtuner_menu.append(item_fmtuner_down)
         menu.append(item_fmtuner)
+
+        item_power = gtk.MenuItem("Toggle Power")
+        item_power.connect("activate", self.command_service.toggle_power)
+        menu.append(item_power)
 
         item_quit = gtk.MenuItem("Quit")
         item_quit.connect("activate", self.quit)
