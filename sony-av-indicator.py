@@ -508,8 +508,7 @@ class CommandService():
             self.state_service.update_power(True)
 
     def set_volume(self, widget, vol):
-        vol2 = min(vol, LIMIT_VOLUME)
-        cmd = bytearray([0x02, 0x06, 0xA0, 0x52, 0x00, 0x03, 0x00, vol2, 0x00])
+        cmd = bytearray([0x02, 0x06, 0xA0, 0x52, 0x00, 0x03, 0x00, min(vol, LIMIT_VOLUME), 0x00])
         self.send_command(cmd)
         self.state_service.update_volume(vol)
 
