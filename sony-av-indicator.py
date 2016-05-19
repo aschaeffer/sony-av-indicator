@@ -36,6 +36,8 @@ MIN_VOLUME = 0
 LOW_VOLUME = 15
 MEDIUM_VOLUME = 30
 MAX_VOLUME = 45
+LIMIT_VOLUME = MAX_VOLUME
+
 ICON_PATH = "/usr/share/icons/ubuntu-mono-dark/status/24"
 
 SOURCE_NAMES = [ "bdDvd", "game", "satCaTV", "video", "tv", "saCd", "fmTuner", "bluetooth", "usb", "homeNetwork", "internetServices", "screenMirroring", "googleCast" ]
@@ -450,6 +452,7 @@ class StateService():
                 else:
                     self.sony_av_indicator.show_notification("<b>Auto Phase Matching</b>", "OFF", None)
 
+
 class CommandService():
 
     device_service = None
@@ -505,7 +508,8 @@ class CommandService():
             self.state_service.update_power(True)
 
     def set_volume(self, widget, vol):
-        cmd = bytearray([0x02, 0x06, 0xA0, 0x52, 0x00, 0x03, 0x00, vol, 0x00])
+        vol2 = min(vol, LIMIT_VOLUME)
+        cmd = bytearray([0x02, 0x06, 0xA0, 0x52, 0x00, 0x03, 0x00, vol2, 0x00])
         self.send_command(cmd)
         self.state_service.update_volume(vol)
 
@@ -636,6 +640,7 @@ class DeviceService():
         if self.ip == None:
             print "No device found in the local network!"
 
+
 class FeedbackWatcher(threading.Thread):
 
     device_service = None
@@ -660,7 +665,13 @@ class FeedbackWatcher(threading.Thread):
 
     def check_volume(self, data):
         if FEEDBACK_VOLUME == data[:-1]:
-            self.state_service.update_volume(ord(data[-1]))
+            vol = ord(data[-1])
+            if vol < LIMIT_VOLUME:
+                self.state_service.update_volume(vol)
+            else:
+                self.command_service.block_sending = False
+                self.command_service.set_volume(None, LIMIT_VOLUME)
+                self.command_service.block_sending = True
             return True
         return False
 
