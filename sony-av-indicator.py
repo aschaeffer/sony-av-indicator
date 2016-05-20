@@ -25,7 +25,7 @@ from gi.repository import Gdk as gdk
 from gi.repository import AppIndicator3 as appindicator
 from gi.repository import Notify as notify
 
-logging.basicConfig(level=logging.ERROR)
+logging.basicConfig(level = logging.INFO, format = "%(asctime)-15s [%(name)-5s] [%(levelname)-5s] %(message)s", datefmt="%Y-%m-%d %H:%M:%S")
 
 APPINDICATOR_ID = "sony-av-indicator"
 
@@ -262,6 +262,8 @@ class StateService():
     sony_av_indicator = None
     initialized = False
 
+    logger = logging.getLogger("state")
+
     states = {
         "power": True,
         "volume": LOW_VOLUME,
@@ -294,19 +296,19 @@ class StateService():
         "auto_phase_matching": True,
     }
 
-    debug = {
-        "power": True,
-        "volume": True,
-        "muted": True,
-        "source": True,
-        "sound_field": True,
-        "pure_direct": True,
-        "sound_optimizer": True,
-        "timer": True,
-        "fmtuner": True,
-        "auto_standby": True,
-        "auto_phase_matching": True,
-    }
+#    debug = {
+#        "power": True,
+#        "volume": True,
+#        "muted": True,
+#        "source": True,
+#        "sound_field": True,
+#        "pure_direct": True,
+#        "sound_optimizer": True,
+#        "timer": True,
+#        "fmtuner": True,
+#        "auto_standby": True,
+#        "auto_phase_matching": True,
+#    }
 
     def __init__(self, sony_av_indicator):
         self.sony_av_indicator = sony_av_indicator
@@ -329,8 +331,8 @@ class StateService():
             self.power = power
             if not state_only:
                 self.sony_av_indicator.update_label()
-            if self.debug["power"] and changed:
-                print "Power state:", power
+            if changed:
+                self.logger.debug("Power state: %s" % power)
             if self.notifications["power"] and changed and not state_only:
                 if power:
                     self.sony_av_indicator.show_notification("<b>Power ON</b>", "", None)
@@ -343,8 +345,7 @@ class StateService():
                 self.muted = False
             self.volume = vol
             self.sony_av_indicator.set_volume_icon(vol)
-            if self.debug["volume"]:
-                print "Volume ", vol
+            self.logger.debug("Volume %d" % vol)
             if self.notifications["volume"]:
                 # TODO: Show volume slider notification
                 pass
@@ -354,11 +355,11 @@ class StateService():
             changed = (muted != self.muted)
             self.muted = muted
             self.sony_av_indicator.set_volume_icon(self.volume)
-            if self.debug["muted"] and changed:
+            if changed:
                 if self.muted:
-                    print "Muted"
+                    self.logger.debug("Muted")
                 else:
-                    print "Unmuted"
+                    self.logger.debug("Unmuted")
             if self.notifications["muted"] and changed:
                 if self.muted:
                     self.sony_av_indicator.show_notification("<b>Muted</b>", "", self.sony_av_indicator.get_volume_icon_path("audio-volume-muted-panel"))
@@ -371,24 +372,23 @@ class StateService():
         if not state_only:
             self.update_power(True, True)
             self.sony_av_indicator.update_label()
-        if self.debug["source"]:
-            print "Source:", source
+        if changed:
+            self.logger.debug("Source: %s" % source)
         if self.notifications["source"] and changed and not state_only:
             self.sony_av_indicator.show_notification("<b>Source</b>", SOURCE_MENU_MAP[source], None)
 
     def update_sound_field(self, sound_field, state_only = False):
         changed = (sound_field != self.sound_field)
         self.sound_field = sound_field
-        if self.debug["sound_field"]:
-            print "Sound field:", sound_field
+        if changed:
+            self.logger.debug("Sound field: %s" % sound_field)
         if self.notifications["sound_field"] and changed and not state_only:
             self.sony_av_indicator.show_notification("<b>Sound Field</b>", SOUND_FIELD_MENU_MAP[sound_field], None)
 
     def update_pure_direct(self, pure_direct):
         if self.initialized:
             self.pure_direct = pure_direct
-            if self.debug["pure_direct"]:
-                print "Pure Direct:", pure_direct
+            self.logger.debug("Pure Direct: %s" % pure_direct)
             if self.notifications["pure_direct"]:
                 if self.pure_direct:
                     self.sony_av_indicator.show_notification("<b>Pure Direct ON</b>", "", None)
@@ -398,8 +398,7 @@ class StateService():
     def update_sound_optimizer(self, sound_optimizer):
         if self.initialized:
             self.sound_optimizer = sound_optimizer
-            if self.debug["sound_optimizer"]:
-                print "Sound Optimizer:", sound_optimizer
+            self.logger.debug("Sound Optimizer: %s" % sound_optimizer)
             if self.notifications["sound_optimizer"]:
                 self.sony_av_indicator.show_notification("<b>Sound Optimizer</b>", SOUND_OPTIMIZER_MENU_MAP[sound_optimizer], None)
 
@@ -407,8 +406,7 @@ class StateService():
         self.timer = set_timer
         self.timer_hours = hours
         self.timer_minutes = minutes
-        if self.debug["timer"]:
-            print "Timer:", hours, minutes, seconds, set_timer, was_updated
+        self.logger.debug("Timer: %d:%d:%d Set: %s Updated: %s" %(hours, minutes, seconds, set_timer, was_updated))
         if self.notifications["timer"]:
             if not set_timer:
                 self.sony_av_indicator.show_notification("<b>Timer OFF</b>", "", None)
@@ -422,8 +420,7 @@ class StateService():
             self.fmtuner = fmtuner
             self.fmtunerstereo = stereo
             self.fmtunerfreq = freq
-            if self.debug["fmtuner"]:
-                print "FM Tuner:", fmtuner, stereo, freq
+            self.logger.debug("FM Tuner: %d (%3.2f MHz) Stereo: %s", fmtuner, freq, stereo)
             if self.notifications["fmtuner"]:
                 if fmtuner != 255:
                     self.sony_av_indicator.show_notification("<b>FM Tuner %d</b>" %(fmtuner), "%s (%3.2f MHz)" %(FM_TUNER_MENU_MAP[str(fmtuner)], freq), None)
@@ -433,8 +430,7 @@ class StateService():
     def update_auto_standby(self, auto_standby):
         if self.initialized:
             self.auto_standby = auto_standby
-            if self.debug["auto_standby"]:
-                print "Auto Standby:", auto_standby
+            self.logger.debug("Auto Standby: %s" % auto_standby)
             if self.notifications["auto_standby"]:
                 if auto_standby:
                     self.sony_av_indicator.show_notification("<b>Auto Standby</b>", "ON", None)
@@ -444,8 +440,7 @@ class StateService():
     def update_auto_phase_matching(self, auto_phase_matching):
         if self.initialized:
             self.auto_phase_matching = auto_phase_matching
-            if self.debug["auto_phase_matching"]:
-                print "Auto Phase Matching:", auto_phase_matching
+            self.logger.debug("Auto Phase Matching: %s", auto_phase_matching)
             if self.notifications["auto_phase_matching"]:
                 if auto_phase_matching:
                     self.sony_av_indicator.show_notification("<b>Auto Phase Matching</b>", "AUTO", None)
@@ -463,6 +458,9 @@ class CommandService():
     scroll_step_volume = 2
 
     debug_send_commands = True
+
+    logger = logging.getLogger("cmd")
+    data_logger = logging.getLogger("send")
 
     def __init__(self, device_service, state_service):
         self.device_service = device_service
@@ -482,13 +480,11 @@ class CommandService():
             s.connect((self.device_service.ip, TCP_PORT))
             s.send(cmd)
             s.close()
-            if self.debug_send_commands:
-                print "[sending] " + ", ".join([hex(byte) for byte in cmd])
+            self.data_logger.debug("%s", ", ".join([hex(byte) for byte in cmd]))
         else:
             # Wait on this thread or get a segmentation fault!
             time.sleep (50.0 / 1000.0);
-            if self.debug_send_commands:
-                print "[ignore] " + ", ".join([hex(byte) for byte in cmd])
+            # self.data_logger.debug("%s", ", ".join([hex(byte) for byte in cmd]))
 
     def send_command_w(self, widget, cmd):
         self.send_command(cmd)
@@ -500,12 +496,13 @@ class CommandService():
         self.send_command(CMD_POWER_OFF)
 
     def toggle_power(self, widget):
-        if self.state_service.power:
-            self.power_off()
-            self.state_service.update_power(False)
-        else:
-            self.power_on()
-            self.state_service.update_power(True)
+        if self.initialized:
+            if self.state_service.power:
+                self.power_off()
+                self.state_service.update_power(False)
+            else:
+                self.power_on()
+                self.state_service.update_power(True)
 
     def set_volume(self, widget, vol):
         cmd = bytearray([0x02, 0x06, 0xA0, 0x52, 0x00, 0x03, 0x00, min(vol, LIMIT_VOLUME), 0x00])
@@ -618,11 +615,15 @@ class DeviceService():
 
     ip = None
 
+    logger = logging.getLogger("dev")
+
     def __init__(self):
         self.my_ip = [l for l in ([ip for ip in socket.gethostbyname_ex(socket.gethostname())[2] if not ip.startswith("127.")][:1], [[(s.connect(('8.8.8.8', 53)), s.getsockname()[0], s.close()) for s in [socket.socket(socket.AF_INET, socket.SOCK_DGRAM)]][0][1]]) if l][0][0]
         self.my_network = self.my_ip.rsplit(".", 1)[0]
+        self.logger.debug("Network: %s IP: %s" %(self.my_network, self.my_ip))
 
     def find_device(self):
+        self.logger.debug("Searching for devices in %s.*" %(self.my_network))
         threads = []
         for last_octet in range(1, 254):
             device_ip = "%s.%s" %(self.my_network, last_octet)
@@ -634,10 +635,10 @@ class DeviceService():
             threads[last_octet - 1].join()
             if threads[last_octet - 1].result == 0:
                 self.ip = threads[last_octet - 1].ip
-                print "Detected device on %s:%s" %(self.ip, TCP_PORT)
+                self.logger.info("Detected device on %s:%d" %(self.ip, TCP_PORT))
 
         if self.ip == None:
-            print "No device found in the local network!"
+            self.logger.error("No device found in the local network!")
 
 
 class FeedbackWatcher(threading.Thread):
@@ -648,8 +649,8 @@ class FeedbackWatcher(threading.Thread):
     ended = False
     socket = None
 
-    debug_receive_commands = True
-    debug_unknown_commands = True
+    logger = logging.getLogger("feed")
+    data_logger = logging.getLogger("recv")
 
     def __init__(self, sony_av_indicator, device_service, state_service, command_service):
         threading.Thread.__init__(self)
@@ -764,20 +765,19 @@ class FeedbackWatcher(threading.Thread):
             return True
         return False
         
-    def debug_data(self, data, prepend_text="[receiving] "):
-        if self.debug_unknown_commands:
-            print "%s%s" %(prepend_text, ", ".join([hex(ord(byte)) for byte in data]))
+    def debug_data(self, data, prepend_text=""):
+        self.data_logger.debug("%s%s" %(prepend_text, ", ".join([hex(ord(byte)) for byte in data])))
 
     def connect(self):
         self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.socket.connect((self.device_service.ip, TCP_PORT))
-        print "Connected"
+        self.logger.info("Connected to %s:%d" % (self.device_service.ip, TCP_PORT))
         
     def reconnect(self):
         self.socket.close()
         self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.socket.connect((self.device_service.ip, TCP_PORT))
-        print "Reconnected"
+        self.logger.info("Reconnected")
 
     def run(self):
         self.connect()
@@ -786,7 +786,7 @@ class FeedbackWatcher(threading.Thread):
                 data = self.socket.recv(BUFFER_SIZE)
                 # Prevent feedback loops by block sending commands
                 self.command_service.block_sending = True
-                if self.debug_receive_commands and not self.ended:
+                if not self.ended:
                     self.debug_data(data)
                 if not self.check_timer(data) and \
                    not self.check_source(data) and \
@@ -799,15 +799,14 @@ class FeedbackWatcher(threading.Thread):
                    not self.check_auto_phase_matching(data) and \
                    not self.ended:
                     self.debug_data(data, "[unknown data packet]\n")
-            except Exception, err:
-                print "Socket read error: ", err
-                traceback.print_exc()
+            except Exception as e:
+                self.logger.exception("Failed to process data")
                 self.reconnect()
             finally:
                 # Unblock sending commands after processing
                 self.command_service.block_sending = False
         self.socket.close()
-        print "Connection closed"
+        self.logger.info("Connection closed")
 
 
 class SonyAvIndicator():
