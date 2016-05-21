@@ -25,7 +25,7 @@ from gi.repository import Gdk as gdk
 from gi.repository import AppIndicator3 as appindicator
 from gi.repository import Notify as notify
 
-logging.basicConfig(level = logging.INFO, format = "%(asctime)-15s [%(name)-5s] [%(levelname)-5s] %(message)s", datefmt="%Y-%m-%d %H:%M:%S")
+logging.basicConfig(level = logging.DEBUG, format = "%(asctime)-15s [%(name)-5s] [%(levelname)-5s] %(message)s", datefmt="%Y-%m-%d %H:%M:%S")
 
 APPINDICATOR_ID = "sony-av-indicator"
 
@@ -69,6 +69,9 @@ CMD_UNMUTE                = bytearray([0x02, 0x04, 0xA0, 0x53, 0x00, 0x00, 0x00]
 CMD_POWER_ON              = bytearray([0x02, 0x04, 0xA0, 0x60, 0x00, 0x01, 0x00])
 CMD_POWER_OFF             = bytearray([0x02, 0x04, 0xA0, 0x60, 0x00, 0x00, 0x00])
 
+CMD_HDMIOUT_ON            = bytearray([0x02, 0x03, 0xA0, 0x45, 0x00, 0x00])
+CMD_HDMIOUT_OFF           = bytearray([0x02, 0x03, 0xA0, 0x45, 0x03, 0x00])
+
 # Last byte seems to be zero (but was a checksum)
 CMD_SOUND_FIELD_MAP = {
     "twoChannelStereo":     bytearray([0x02, 0x03, 0xA3, 0x42, 0x00, 0x00]),
@@ -100,8 +103,10 @@ CMD_FMTUNER = [
 CMD_FMTUNER_PRESET_DOWN   = bytearray([0x02, 0x02, 0xA1, 0x0C, 0x51, 0x00])
 CMD_FMTUNER_PRESET_UP     = bytearray([0x02, 0x02, 0xA1, 0x0B, 0x52, 0x00])
 
-CMD_MIN_VOLUME            = bytearray([0x02, 0x06, 0xA0, 0x52, 0x00, 0x03, 0x00, 0x00, 0x00])
-CMD_MAX_VOLUME            = bytearray([0x02, 0x06, 0xA0, 0x52, 0x00, 0x03, 0x00, 0x4A, 0x00])
+CMD_VOLUME_MIN            = bytearray([0x02, 0x06, 0xA0, 0x52, 0x00, 0x03, 0x00, 0x00, 0x00])
+CMD_VOLUME_MAX            = bytearray([0x02, 0x06, 0xA0, 0x52, 0x00, 0x03, 0x00, 0x4A, 0x00])
+CMD_VOLUME_UP             = bytearray([0x02, 0x03, 0xA0, 0x55, 0x00, 0x00])
+CMD_VOLUME_DOWN           = bytearray([0x02, 0x03, 0xA0, 0x56, 0x00, 0x00])
 
 # three bytes follows:
 # - hours
@@ -266,6 +271,7 @@ class StateService():
 
     states = {
         "power": True,
+        "hdmiout": True,
         "volume": LOW_VOLUME,
         "muted": False,
         "source": None,
@@ -284,6 +290,7 @@ class StateService():
 
     notifications = {
         "power": True,
+        "hdmiout": True,
         "volume": False,
         "muted": True,
         "source": True,
@@ -295,20 +302,6 @@ class StateService():
         "auto_standby": True,
         "auto_phase_matching": True,
     }
-
-#    debug = {
-#        "power": True,
-#        "volume": True,
-#        "muted": True,
-#        "source": True,
-#        "sound_field": True,
-#        "pure_direct": True,
-#        "sound_optimizer": True,
-#        "timer": True,
-#        "fmtuner": True,
-#        "auto_standby": True,
-#        "auto_phase_matching": True,
-#    }
 
     def __init__(self, sony_av_indicator):
         self.sony_av_indicator = sony_av_indicator
@@ -324,7 +317,7 @@ class StateService():
             self.states[key] = value
         except KeyError, err:
             raise AttributeError(key)
-        
+
     def update_power(self, power, state_only = False):
         if self.initialized:
             changed = (power != self.power)
@@ -338,6 +331,18 @@ class StateService():
                     self.sony_av_indicator.show_notification("<b>Power ON</b>", "", None)
                 else:
                     self.sony_av_indicator.show_notification("<b>Power OFF</b>", "", None)
+
+    def update_hdmiout(self, hdmiout, state_only = False):
+        if self.initialized:
+            changed = (hdmiout != self.hdmiout)
+            self.hdmiout = hdmiout
+            if changed:
+                self.logger.debug("HDMI Out: %s" % hdmiout)
+            if self.notifications["hdmiout"] and changed and not state_only:
+                if hdmiout:
+                    self.sony_av_indicator.show_notification("<b>HDMI Out ON</b>", "", None)
+                else:
+                    self.sony_av_indicator.show_notification("<b>HDMI Out OFF</b>", "", None)
 
     def update_volume(self, vol):
         if self.initialized:
@@ -457,8 +462,6 @@ class CommandService():
 
     scroll_step_volume = 2
 
-    debug_send_commands = True
-
     logger = logging.getLogger("cmd")
     data_logger = logging.getLogger("send")
 
@@ -503,6 +506,21 @@ class CommandService():
             else:
                 self.power_on()
                 self.state_service.update_power(True)
+
+    def hdmiout_on(self):
+        self.send_command(CMD_HDMIOUT_ON)
+
+    def hdmiout_off(self):
+        self.send_command(CMD_HDMIOUT_OFF)
+
+    def toggle_hdmiout(self, widget):
+        if self.initialized:
+            if self.state_service.hdmiout:
+                self.hdmiout_off()
+                self.state_service.update_hdmiout(False)
+            else:
+                self.hdmiout_on()
+                self.state_service.update_hdmiout(True)
 
     def set_volume(self, widget, vol):
         cmd = bytearray([0x02, 0x06, 0xA0, 0x52, 0x00, 0x03, 0x00, min(vol, LIMIT_VOLUME), 0x00])
@@ -606,6 +624,19 @@ class ScanPort(threading.Thread):
         self.result = _socket.connect_ex((self.ip, TCP_PORT))
         _socket.close()
 
+class GtkUpdater(threading.Thread):
+    
+    ended = False
+
+    def __init__(self):
+        threading.Thread.__init__(self)
+    
+    def run(self):
+        while not self.ended:
+            gtk.main_iteration_do(False)
+
+    def kill(self):
+        self.ended = True
 
 class DeviceService():
 
@@ -631,11 +662,16 @@ class DeviceService():
             thread.start()
             threads.append(thread)
 
+        gtk_updater = GtkUpdater()
+        gtk_updater.start()
+
         for last_octet in range(1, 254):
             threads[last_octet - 1].join()
             if threads[last_octet - 1].result == 0:
                 self.ip = threads[last_octet - 1].ip
                 self.logger.info("Detected device on %s:%d" %(self.ip, TCP_PORT))
+
+        gtk_updater.kill()
 
         if self.ip == None:
             self.logger.error("No device found in the local network!")
@@ -764,7 +800,11 @@ class FeedbackWatcher(threading.Thread):
             self.state_service.update_auto_phase_matching(True)
             return True
         return False
-        
+
+    def probe_volume(self):
+        self.command_service.send_command(CMD_VOLUME_DOWN)
+        self.command_service.send_command(CMD_VOLUME_UP)
+
     def debug_data(self, data, prepend_text=""):
         self.data_logger.debug("%s%s" %(prepend_text, ", ".join([hex(ord(byte)) for byte in data])))
 
@@ -830,11 +870,9 @@ class SonyAvIndicator():
     def __init__(self):
         
         self.device_service = DeviceService()
-        self.device_service.find_device()
-
         self.state_service = StateService(self)
-        
         self.command_service = CommandService(self.device_service, self.state_service)
+        self.feedback_watcher = FeedbackWatcher(self, self.device_service, self.state_service, self.command_service)
 
         self.indicator = appindicator.Indicator.new(APPINDICATOR_ID, self.get_volume_icon_path(self.get_volume_icon(LOW_VOLUME)), appindicator.IndicatorCategory.SYSTEM_SERVICES)
         self.indicator.set_status(appindicator.IndicatorStatus.ACTIVE)
@@ -847,16 +885,29 @@ class SonyAvIndicator():
 
         signal.signal(signal.SIGINT, signal.SIG_DFL)
 
-        self.feedback_watcher = FeedbackWatcher(self, self.device_service, self.state_service, self.command_service)
+        self.initialize_device()
+
         self.feedback_watcher.start()
         
         self.set_initialized(True)
+        
+        self.feedback_watcher.probe_volume()
 
     def quit(self, source):
         self.set_initialized(False)
         self.feedback_watcher.kill()
         self.feedback_watcher.join(8)
         gtk.main_quit()
+
+    def initialize_device(self):
+        self.update_label("Searching")
+        self.device_service.find_device()
+        self.update_label("Connected")
+        self.device_service.initialized = True
+
+    def poll_state(self):
+        self.command_service.mute(None)
+        self.command_service.unmute(None)
 
     def set_initialized(self, initialized):
         self.initialized = initialized
@@ -888,8 +939,10 @@ class SonyAvIndicator():
             self.notification.update(title, text, icon)
             self.notification.show()
 
-    def update_label(self):
-        if self.show_source_name:
+    def update_label(self, text = None):
+        if text != None:
+            self.indicator.set_label(text, "")
+        elif self.show_source_name:
             if not self.state_service.power:
                 label = "Power Off"
             elif self.state_service.source == "fmTuner" and self.state_service.fmtuner != None:
@@ -910,23 +963,29 @@ class SonyAvIndicator():
         self.sound_field_menu_items[sound_field].set_active(True)
 
     def scroll(self, indicator, steps, direction):
-        if direction == gdk.ScrollDirection.DOWN:
-            self.command_service.volume_down()
-        elif direction == gdk.ScrollDirection.UP:
-            self.command_service.volume_up()
-        elif direction == gdk.ScrollDirection.LEFT:
-            if self.state_service.source == "fmTuner":
-                self.command_service.fmtuner_preset_down(None)
-            else:
-                self.command_service.source_up()
-        elif direction == gdk.ScrollDirection.RIGHT:
-            if self.state_service.source == "fmTuner":
-                self.command_service.fmtuner_preset_up(None)
-            else:
-                self.command_service.source_down()
+        if self.initialized:
+            if direction == gdk.ScrollDirection.DOWN:
+                self.command_service.volume_down()
+            elif direction == gdk.ScrollDirection.UP:
+                self.command_service.volume_up()
+            elif direction == gdk.ScrollDirection.LEFT:
+                if self.state_service.source == "fmTuner":
+                    self.command_service.fmtuner_preset_down(None)
+                else:
+                    self.command_service.source_up()
+            elif direction == gdk.ScrollDirection.RIGHT:
+                if self.state_service.source == "fmTuner":
+                    self.command_service.fmtuner_preset_up(None)
+                else:
+                    self.command_service.source_down()
 
     def open_web_ui(self, widget):
         webbrowser.open("http://%s/" %(self.device_service.ip), 2)
+
+    def create_menu_item(self, menu, name, cmd):
+        item = gtk.MenuItem(name)
+        item.connect("activate", self.command_service.send_command_w, cmd)
+        menu.append(item)
 
     def build_menu(self):
         menu = gtk.Menu()
@@ -992,6 +1051,10 @@ class SonyAvIndicator():
         item_power.connect("activate", self.command_service.toggle_power)
         menu.append(item_power)
 
+        item_hdmiout = gtk.MenuItem("Toggle HDMI Out")
+        item_hdmiout.connect("activate", self.command_service.toggle_hdmiout)
+        menu.append(item_hdmiout)
+
         menu.append(gtk.SeparatorMenuItem())
 
         item_web_ui = gtk.MenuItem("Open Web Configuration")
@@ -1003,6 +1066,8 @@ class SonyAvIndicator():
         item_quit = gtk.MenuItem("Quit")
         item_quit.connect("activate", self.quit)
         menu.append(item_quit)
+
+        menu.append(gtk.SeparatorMenuItem())
 
         menu.show_all()
         return menu
