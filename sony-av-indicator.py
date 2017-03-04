@@ -29,7 +29,9 @@ logging.basicConfig(level = logging.DEBUG, format = "%(asctime)-15s [%(name)-5s]
 
 APPINDICATOR_ID = "sony-av-indicator"
 
-TCP_PORT = 33335
+# 80, 5000, 8008, 8009, 10000, 22222, 33335, 33336, 35275, 41824, 50001, 50002, 52323, 54400
+TCP_PORT_1 = 33335
+TCP_PORT_2 = 33336
 BUFFER_SIZE = 1024
 
 MIN_VOLUME = 0
@@ -51,8 +53,15 @@ CMD_SOURCE_MAP = {
     "video":                bytearray([0x02, 0x04, 0xA0, 0x42, 0x00, 0x10, 0x00]),
     "tv":                   bytearray([0x02, 0x04, 0xA0, 0x42, 0x00, 0x1A, 0x00]),
     "saCd":                 bytearray([0x02, 0x04, 0xA0, 0x42, 0x00, 0x02, 0x00]),
+    # "hdmi1":              bytearray([0x02, 0x04, 0xA0, 0x42, 0x00, 0x21, 0x00]),
+    # "hdmi2":              bytearray([0x02, 0x04, 0xA0, 0x42, 0x00, 0x22, 0x00]),
+    # "hdmi3":              bytearray([0x02, 0x04, 0xA0, 0x42, 0x00, 0x23, 0x00]),
+    # "hdmi4":              bytearray([0x02, 0x04, 0xA0, 0x42, 0x00, 0x24, 0x00]),
+    # "hdmi5":              bytearray([0x02, 0x04, 0xA0, 0x42, 0x00, 0x25, 0x00]),
+    # "hdmi6":              bytearray([0x02, 0x04, 0xA0, 0x42, 0x00, 0x26, 0x00]),
     "fmTuner":              bytearray([0x02, 0x04, 0xA0, 0x42, 0x00, 0x2E, 0x00]),
     "amTuner":              bytearray([0x02, 0x04, 0xA0, 0x42, 0x00, 0x2F, 0x00]),
+    # "shoutcast":          bytearray([0x02, 0x04, 0xA0, 0x42, 0x00, 0x32, 0x00]),
     "bluetooth":            bytearray([0x02, 0x04, 0xA0, 0x42, 0x00, 0x33, 0x00]),
     "usb":                  bytearray([0x02, 0x04, 0xA0, 0x42, 0x00, 0x34, 0x00]),
     "homeNetwork":          bytearray([0x02, 0x04, 0xA0, 0x42, 0x00, 0x3D, 0x00]),
@@ -471,7 +480,7 @@ class CommandService():
 
     def connect(self):
         s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        s.connect((_device_service.ip, TCP_PORT))
+        s.connect((_device_service.ip, TCP_PORT_1))
         return s
 
     def disconnect(self, s):
@@ -480,7 +489,19 @@ class CommandService():
     def send_command(self, cmd):
         if not self.block_sending:
             s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            s.connect((self.device_service.ip, TCP_PORT))
+            s.connect((self.device_service.ip, TCP_PORT_1))
+            s.send(cmd)
+            s.close()
+            self.data_logger.debug("%s", ", ".join([hex(byte) for byte in cmd]))
+        else:
+            # Wait on this thread or get a segmentation fault!
+            time.sleep (50.0 / 1000.0);
+            # self.data_logger.debug("%s", ", ".join([hex(byte) for byte in cmd]))
+
+    def send_command_2(self, cmd):
+        if not self.block_sending:
+            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            s.connect((self.device_service.ip, 33336))
             s.send(cmd)
             s.close()
             self.data_logger.debug("%s", ", ".join([hex(byte) for byte in cmd]))
@@ -521,6 +542,13 @@ class CommandService():
             else:
                 self.hdmiout_on()
                 self.state_service.update_hdmiout(True)
+
+    def test(self, widget):
+        # cmd = bytearray([0x02, 0x03, 0xA0, 0x82, 0x00])
+        # cmd = bytearray([0x02, 0x04, 0xA0, 0x92, 0x00, 0x01])
+        # cmd = bytearray([0x02, 0x03, 0xA0, 0x45, 0x00, 0x00])
+        cmd = bytearray([0x02, 0x04, 0xA0, 0x60, 0x2A, 0x00])
+        self.send_command(cmd)
 
     def set_volume(self, widget, vol):
         cmd = bytearray([0x02, 0x06, 0xA0, 0x52, 0x00, 0x03, 0x00, min(vol, LIMIT_VOLUME), 0x00])
@@ -621,7 +649,7 @@ class ScanPort(threading.Thread):
     def run(self):
         _socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         _socket.settimeout(3)
-        self.result = _socket.connect_ex((self.ip, TCP_PORT))
+        self.result = _socket.connect_ex((self.ip, TCP_PORT_1))
         _socket.close()
 
 class GtkUpdater(threading.Thread):
@@ -669,7 +697,7 @@ class DeviceService():
             threads[last_octet - 1].join()
             if threads[last_octet - 1].result == 0:
                 self.ip = threads[last_octet - 1].ip
-                self.logger.info("Detected device on %s:%d" %(self.ip, TCP_PORT))
+                self.logger.info("Detected device on %s:%d" %(self.ip, TCP_PORT_1))
 
         gtk_updater.kill()
 
@@ -684,16 +712,19 @@ class FeedbackWatcher(threading.Thread):
     command_service = None
     ended = False
     socket = None
+    port = None
 
     logger = logging.getLogger("feed")
     data_logger = logging.getLogger("recv")
 
-    def __init__(self, sony_av_indicator, device_service, state_service, command_service):
+    def __init__(self, sony_av_indicator, device_service, state_service, command_service, port):
         threading.Thread.__init__(self)
         self.sony_av_indicator = sony_av_indicator
         self.device_service = device_service
         self.state_service = state_service
         self.command_service = command_service
+        self.port = port
+        self.data_logger = logging.getLogger("recv:%s"%(port))
 
     def kill(self):
         self.ended = True
@@ -802,27 +833,41 @@ class FeedbackWatcher(threading.Thread):
         return False
 
     def probe_volume(self):
+        time.sleep(0.1)
         self.command_service.send_command(CMD_VOLUME_DOWN)
+        time.sleep(0.1)
         self.command_service.send_command(CMD_VOLUME_UP)
+
+    def probe_input(self):
+        time.sleep(0.1)
+        self.command_service.send_command(CMD_MUTE)
+        time.sleep(0.1)
+        self.command_service.send_command(CMD_UNMUTE)
 
     def debug_data(self, data, prepend_text=""):
         self.data_logger.debug("%s%s" %(prepend_text, ", ".join([hex(ord(byte)) for byte in data])))
 
     def connect(self):
         self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self.socket.connect((self.device_service.ip, TCP_PORT))
-        self.logger.info("Connected to %s:%d" % (self.device_service.ip, TCP_PORT))
+        #self.socket.connect((self.device_service.ip, TCP_PORT_1))
+        #self.logger.info("Connected to %s:%d" % (self.device_service.ip, TCP_PORT_1))
+        self.socket.connect((self.device_service.ip, self.port))
+        self.socket.settimeout(60.0)
+        self.logger.info("Connected to %s:%d" % (self.device_service.ip, self.port))
         
     def reconnect(self):
         self.socket.close()
         self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self.socket.connect((self.device_service.ip, TCP_PORT))
+        self.socket.connect((self.device_service.ip, TCP_PORT_1))
+        self.socket.settimeout(60.0)
+        self.command_service.block_sending = False
         self.logger.info("Reconnected")
 
     def run(self):
         self.connect()
         while not self.ended:
             try:
+                time.sleep(0.1)
                 data = self.socket.recv(BUFFER_SIZE)
                 # Prevent feedback loops by block sending commands
                 self.command_service.block_sending = True
@@ -839,8 +884,11 @@ class FeedbackWatcher(threading.Thread):
                    not self.check_auto_phase_matching(data) and \
                    not self.ended:
                     self.debug_data(data, "[unknown data packet]\n")
+            except socket.timeout, e:
+                self.logger.exception("Timeout: reconnecting...")
+                self.reconnect()
             except Exception as e:
-                self.logger.exception("Failed to process data")
+                self.logger.exception("Failed to process data: reconnecting...")
                 self.reconnect()
             finally:
                 # Unblock sending commands after processing
@@ -853,7 +901,8 @@ class SonyAvIndicator():
 
     indicator = None
     device_service = None
-    feedback_watcher = None
+    feedback_watcher_1 = None
+    feedback_watcher_2 = None
     command_service = None
     notification = notify.Notification.new("")
     notifications_initialized = False
@@ -872,7 +921,8 @@ class SonyAvIndicator():
         self.device_service = DeviceService()
         self.state_service = StateService(self)
         self.command_service = CommandService(self.device_service, self.state_service)
-        self.feedback_watcher = FeedbackWatcher(self, self.device_service, self.state_service, self.command_service)
+        self.feedback_watcher_1 = FeedbackWatcher(self, self.device_service, self.state_service, self.command_service, TCP_PORT_1)
+        self.feedback_watcher_2 = FeedbackWatcher(self, self.device_service, self.state_service, self.command_service, TCP_PORT_2)
 
         self.indicator = appindicator.Indicator.new(APPINDICATOR_ID, self.get_volume_icon_path(self.get_volume_icon(LOW_VOLUME)), appindicator.IndicatorCategory.SYSTEM_SERVICES)
         self.indicator.set_status(appindicator.IndicatorStatus.ACTIVE)
@@ -887,16 +937,25 @@ class SonyAvIndicator():
 
         self.initialize_device()
 
-        self.feedback_watcher.start()
+        if self.feedback_watcher_1 != None:
+            self.feedback_watcher_1.start()
+        if self.feedback_watcher_2 != None:
+            self.feedback_watcher_2.start()
         
         self.set_initialized(True)
         
-        self.feedback_watcher.probe_volume()
+        self.feedback_watcher_1.probe_volume()
+        self.feedback_watcher_1.probe_input()
 
     def quit(self, source):
+        self.update_label("Disconnecting...")
         self.set_initialized(False)
-        self.feedback_watcher.kill()
-        self.feedback_watcher.join(8)
+        if self.feedback_watcher_1 != None:
+            self.feedback_watcher_1.kill()
+            self.feedback_watcher_1.join(8)
+        if self.feedback_watcher_2 != None:
+            self.feedback_watcher_2.kill()
+            self.feedback_watcher_2.join(8)
         gtk.main_quit()
 
     def initialize_device(self):
@@ -1066,6 +1125,12 @@ class SonyAvIndicator():
         item_quit = gtk.MenuItem("Quit")
         item_quit.connect("activate", self.quit)
         menu.append(item_quit)
+
+        menu.append(gtk.SeparatorMenuItem())
+
+        item_test = gtk.MenuItem("Test")
+        item_test.connect("activate", self.command_service.test)
+        menu.append(item_test)
 
         menu.append(gtk.SeparatorMenuItem())
 
