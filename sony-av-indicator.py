@@ -501,7 +501,7 @@ class CommandService():
     def send_command_2(self, cmd):
         if not self.block_sending:
             s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            s.connect((self.device_service.ip, 33336))
+            s.connect((self.device_service.ip, TCP_PORT_2))
             s.send(cmd)
             s.close()
             self.data_logger.debug("%s", ", ".join([hex(byte) for byte in cmd]))
@@ -542,13 +542,6 @@ class CommandService():
             else:
                 self.hdmiout_on()
                 self.state_service.update_hdmiout(True)
-
-    def test(self, widget):
-        # cmd = bytearray([0x02, 0x03, 0xA0, 0x82, 0x00])
-        # cmd = bytearray([0x02, 0x04, 0xA0, 0x92, 0x00, 0x01])
-        # cmd = bytearray([0x02, 0x03, 0xA0, 0x45, 0x00, 0x00])
-        cmd = bytearray([0x02, 0x04, 0xA0, 0x60, 0x2A, 0x00])
-        self.send_command(cmd)
 
     def set_volume(self, widget, vol):
         cmd = bytearray([0x02, 0x06, 0xA0, 0x52, 0x00, 0x03, 0x00, min(vol, LIMIT_VOLUME), 0x00])
@@ -1125,12 +1118,6 @@ class SonyAvIndicator():
         item_quit = gtk.MenuItem("Quit")
         item_quit.connect("activate", self.quit)
         menu.append(item_quit)
-
-        menu.append(gtk.SeparatorMenuItem())
-
-        item_test = gtk.MenuItem("Test")
-        item_test.connect("activate", self.command_service.test)
-        menu.append(item_test)
 
         menu.append(gtk.SeparatorMenuItem())
 
