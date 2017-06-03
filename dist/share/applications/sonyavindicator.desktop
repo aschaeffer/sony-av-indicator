@@ -1,0 +1,10 @@
+[Desktop Entry]
+Categories=AudioVideo;
+Comment=Sony AV indicator.
+Exec=sony-av-indicator.py
+Hidden=False
+Icon=sony-av-indicator
+Name=Sony AV Indicator
+Terminal=false
+Type=Application
+X-GNOME-Autostart-enabled=true

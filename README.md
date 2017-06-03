@@ -10,6 +10,12 @@ Adjust the port of your AVR:
 
     TCP_PORT = 33335
 
+## Installation
+
+Add `sony-av-indicator.desktop` to the list of `interested-media-players`:
+
+    gsettings get com.canonical.indicator.sound interested-media-players
+
 ## Usage
 
     ./sony-av-indicator.py

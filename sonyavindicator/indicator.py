@@ -1,6 +1,7 @@
 #!/usr/bin/env python
+# -*- coding: utf-8 -*-
 
-# TODO: request states (source, field, volume, ...) during startup
+# TODO: request sound field state during startup
 
 __author__ = "andreasschaeffer"
 __author__ = "michaelkapuscik"
@@ -15,6 +16,9 @@ import logging
 import traceback
 import webbrowser
 import time
+import dbus
+import dbus.service
+import binascii
 
 gi.require_version("Gtk", "3.0")
 gi.require_version("AppIndicator3", "0.1")
@@ -24,10 +28,25 @@ from gi.repository import Gtk as gtk
 from gi.repository import Gdk as gdk
 from gi.repository import AppIndicator3 as appindicator
 from gi.repository import Notify as notify
+from gi.repository import GObject
+
+from dbus.mainloop.glib import DBusGMainLoop
+
 
 logging.basicConfig(level = logging.DEBUG, format = "%(asctime)-15s [%(name)-5s] [%(levelname)-5s] %(message)s", datefmt="%Y-%m-%d %H:%M:%S")
 
-APPINDICATOR_ID = "sony-av-indicator"
+APPINDICATOR_ID = "sonyavindicator"
+
+IDENTITY = 'sonyavindicator'
+
+DESKTOP = 'sonyavindicator'
+
+BUS_NAME = 'org.mpris.MediaPlayer2.' + IDENTITY
+OBJECT_PATH = '/org/mpris/MediaPlayer2'
+ROOT_INTERFACE = 'org.mpris.MediaPlayer2'
+PLAYER_INTERFACE = 'org.mpris.MediaPlayer2.Player'
+PROPERTIES_INTERFACE = 'org.freedesktop.DBus.Properties'
+PLAYLISTS_IFACE = 'org.mpris.MediaPlayer2.Playlists'
 
 # 80, 5000, 8008, 8009, 10000, 22222, 33335, 33336, 35275, 41824, 50001, 50002, 52323, 54400
 TCP_PORT_1 = 33335
@@ -318,13 +337,13 @@ class StateService():
     def __getattr__(self, key):
         try:
             return self.states[key]
-        except KeyError, err:
+        except KeyError as err:
             raise AttributeError(key)
 
     def __setattr_(self, key, value):
         try:
             self.states[key] = value
-        except KeyError, err:
+        except KeyError as err:
             raise AttributeError(key)
 
     def update_power(self, power, state_only = False):
@@ -645,6 +664,7 @@ class ScanPort(threading.Thread):
         self.result = _socket.connect_ex((self.ip, TCP_PORT_1))
         _socket.close()
 
+
 class GtkUpdater(threading.Thread):
     
     ended = False
@@ -658,6 +678,7 @@ class GtkUpdater(threading.Thread):
 
     def kill(self):
         self.ended = True
+
 
 class DeviceService():
 
@@ -737,7 +758,7 @@ class FeedbackWatcher(threading.Thread):
 
     def check_source(self, data):
         source_switched = False
-        for source, source_feedback in FEEDBACK_SOURCE_MAP.iteritems():
+        for source, source_feedback in FEEDBACK_SOURCE_MAP.items():
             if source_feedback == data[:-2]:
                 self.sony_av_indicator.update_source(source)
                 # The command also contains the power and muted states
@@ -754,7 +775,7 @@ class FeedbackWatcher(threading.Thread):
 
     def check_sound_field(self, data):
         sound_field_switched = False
-        for sound_field, sound_field_feedback in FEEDBACK_SOUND_FIELD_MAP.iteritems():
+        for sound_field, sound_field_feedback in FEEDBACK_SOUND_FIELD_MAP.items():
             if sound_field_feedback == data:
                 self.sony_av_indicator.update_sound_field(sound_field)
                 sound_field_switched = True
@@ -838,7 +859,7 @@ class FeedbackWatcher(threading.Thread):
         self.command_service.send_command(CMD_UNMUTE)
 
     def debug_data(self, data, prepend_text=""):
-        self.data_logger.debug("%s%s" %(prepend_text, ", ".join([hex(ord(byte)) for byte in data])))
+        self.data_logger.debug("%s%s" %(prepend_text, binascii.hexlify(data)))
 
     def connect(self):
         self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -877,7 +898,7 @@ class FeedbackWatcher(threading.Thread):
                    not self.check_auto_phase_matching(data) and \
                    not self.ended:
                     self.debug_data(data, "[unknown data packet]\n")
-            except socket.timeout, e:
+            except socket.timeout as e:
                 self.logger.exception("Timeout: reconnecting...")
                 self.reconnect()
             except Exception as e:
@@ -890,10 +911,201 @@ class FeedbackWatcher(threading.Thread):
         self.logger.info("Connection closed")
 
 
+class MprisServer(threading.Thread, dbus.service.Object):
+
+    sony_av_indicator = None
+    device_service = None
+    state_service = None
+    command_service = None
+    properties = None
+    bus = None
+    ended = False
+
+    def __init__(self, sony_av_indicator, device_service, state_service, command_service):
+        threading.Thread.__init__(self)
+        self.sony_av_indicator = sony_av_indicator
+        self.device_service = device_service
+        self.state_service = state_service
+        self.command_service = command_service
+        self.properties = {
+            ROOT_INTERFACE: self._get_root_iface_properties(),
+            PLAYER_INTERFACE: self._get_player_iface_properties()
+        }
+        self.main_loop = dbus.mainloop.glib.DBusGMainLoop(set_as_default = True)
+        # self.main_loop = GObject.MainLoop()
+        self.bus = dbus.SessionBus(mainloop = self.main_loop)
+        self.bus_name = self._connect_to_dbus()
+        dbus.service.Object.__init__(self, self.bus_name, OBJECT_PATH)
+
+    def _get_root_iface_properties(self):
+        return {
+            'CanQuit': (True, None),
+            'Fullscreen': (False, None),
+            'CanSetFullscreen': (False, None),
+            'CanRaise': (False, None),
+            # NOTE Change if adding optional track list support
+            'HasTrackList': (False, None),
+            'Identity': (IDENTITY, None),
+            'DesktopEntry': (DESKTOP, None),
+            'SupportedUriSchemes': (dbus.Array([], 's', 1), None),
+            # NOTE Return MIME types supported by local backend if support for
+            # reporting supported MIME types is added
+            'SupportedMimeTypes': (dbus.Array([], 's', 1), None),
+        }
+
+    def _get_player_iface_properties(self):
+        return {
+            'PlaybackStatus': (self.get_playback_status, None),
+            'LoopStatus': (self.get_loop_status, None),
+            'Rate': (1.0, None),
+            'Shuffle': (None, None),
+            'Metadata': (self.get_metadata, None),
+            'Volume': (self.get_volume, self.set_volume),
+            'Position': (None, None),
+            'MinimumRate': (1.0, None),
+            'MaximumRate': (1.0, None),
+            'CanGoNext': (self.can_go_next, None),
+            'CanGoPrevious': (self.can_go_previous, None),
+            'CanPlay': (self.can_play, None),
+            'CanPause': (self.can_pause, None),
+            'CanSeek': (self.can_seek, None),
+            'CanControl': (self.can_control, None),
+        }
+
+    def _connect_to_dbus(self):
+        # bus_type = self.config['mpris']['bus_type']
+        self.bus = dbus.SessionBus()
+        bus_name = dbus.service.BusName(BUS_NAME, self.bus)
+        return bus_name
+
+    def get_playback_status(self):
+        return 'Playing'
+
+    def get_loop_status(self):
+        return 'None'
+
+    def can_go_next(self):
+        return True
+
+    def can_go_previous(self):
+        return True
+
+    def can_play(self):
+        return True
+
+    def can_pause(self):
+        return True
+
+    def can_seek(self):
+        return True
+
+    def can_control(self):
+        return True
+
+    def get_metadata(self):
+        metadata = {
+            'mpris:trackid': self.state_service.source,
+            'mpris:length': 60000
+        }
+        return dbus.Dictionary(metadata, signature = 'sv')
+
+    def get_volume(self):
+        volume = self.state_service.volume
+        if volume is None:
+            return 0
+        return volume / 100.0
+
+    def set_volume(self, value):
+        volume = int(value * 100)
+        if volume < 0:
+            volume = 0
+        elif volume > MAX_VOLUME:
+            volume = MAX_VOLUME
+        self.command_service.set_volume(None, volume)
+
+    @dbus.service.method(PLAYER_INTERFACE)
+    def Pause(self):
+        pass
+
+    @dbus.service.method(PLAYER_INTERFACE)
+    def PlayPause(self):
+        pass
+
+    @dbus.service.method(PLAYER_INTERFACE)
+    def Play(self):
+        pass
+
+    @dbus.service.method(PLAYER_INTERFACE)
+    def Stop(self):
+        pass
+
+    @dbus.service.method(PLAYER_INTERFACE)
+    def Next(self):
+        self.command_service.source_up()
+
+    @dbus.service.method(PLAYER_INTERFACE)
+    def Previous(self):
+        self.command_service.source_down()
+
+    # --- Properties interface
+
+    @dbus.service.method(dbus_interface=PROPERTIES_INTERFACE, in_signature='ss', out_signature='v')
+    def Get(self, interface, prop):
+        print('%s.Get(%s, %s) called' %(dbus.PROPERTIES_IFACE, repr(interface), repr(prop)))
+        (getter, _) = self.properties[interface][prop]
+        if callable(getter):
+            return getter()
+        else:
+            return getter
+
+    @dbus.service.method(dbus_interface=PROPERTIES_INTERFACE, in_signature='s', out_signature='a{sv}')
+    def GetAll(self, interface):
+        print('%s.GetAll(%s) called' %(PROPERTIES_INTERFACE, repr(interface)))
+        getters = {}
+        for key, (getter, _) in self.properties[interface].items():
+            getters[key] = getter() if callable(getter) else getter
+        return getters
+
+    @dbus.service.method(dbus_interface=PROPERTIES_INTERFACE, in_signature='ssv', out_signature='')
+    def Set(self, interface, prop, value):
+        print( '%s.Set(%s, %s, %s) called' %(PROPERTIES_INTERFACE, repr(interface), repr(prop), repr(value)))
+        _, setter = self.properties[interface][prop]
+        if setter is not None:
+            setter(value)
+            self.PropertiesChanged(interface, {prop: self.Get(interface, prop)}, [])
+
+    @dbus.service.signal(dbus_interface=PROPERTIES_INTERFACE, signature='sa{sv}as')
+    def PropertiesChanged(self, interface, changed_properties, invalidated_properties):
+        print('%s.PropertiesChanged(%s, %s, %s) signaled' %(PROPERTIES_INTERFACE, interface, changed_properties, invalidated_properties))
+
+    # --- Root interface methods
+
+    @dbus.service.method(dbus_interface=ROOT_INTERFACE)
+    def Raise(self):
+        print('%s.Raise called' %(ROOT_INTERFACE))
+        # Do nothing, as we do not have a GUI
+
+    @dbus.service.method(dbus_interface=ROOT_INTERFACE)
+    def Quit(self):
+        print('%s.Quit called' %(ROOT_INTERFACE))
+        self.sony_av_indicator.quit(None)
+
+    def kill(self):
+        self.ended = True
+
+    def run(self):
+        while not self.ended:
+            try:
+                time.sleep(0.1)
+            except Exception as e:
+                pass
+
+
 class SonyAvIndicator():
 
     indicator = None
     device_service = None
+    mpris_server = None
     feedback_watcher_1 = None
     feedback_watcher_2 = None
     command_service = None
@@ -914,6 +1126,7 @@ class SonyAvIndicator():
         self.device_service = DeviceService()
         self.state_service = StateService(self)
         self.command_service = CommandService(self.device_service, self.state_service)
+        self.mpris_server = MprisServer(self, self.device_service, self.state_service, self.command_service)
         self.feedback_watcher_1 = FeedbackWatcher(self, self.device_service, self.state_service, self.command_service, TCP_PORT_1)
         self.feedback_watcher_2 = FeedbackWatcher(self, self.device_service, self.state_service, self.command_service, TCP_PORT_2)
 
@@ -930,6 +1143,8 @@ class SonyAvIndicator():
 
         self.initialize_device()
 
+        if self.mpris_server != None:
+            self.mpris_server.start()
         if self.feedback_watcher_1 != None:
             self.feedback_watcher_1.start()
         if self.feedback_watcher_2 != None:
@@ -949,6 +1164,9 @@ class SonyAvIndicator():
         if self.feedback_watcher_2 != None:
             self.feedback_watcher_2.kill()
             self.feedback_watcher_2.join(8)
+        if self.mpris_server != None:
+            self.mpris_server.kill()
+            self.mpris_server.join(8)
         gtk.main_quit()
 
     def initialize_device(self):
@@ -1128,8 +1346,8 @@ class SonyAvIndicator():
         gtk.main()
 
 
-if __name__ == "__main__":
-    sony_av_indicator = SonyAvIndicator()
-    sony_av_indicator.main()
+#if __name__ == "__main__":
+#    sony_av_indicator = SonyAvIndicator()
+#    sony_av_indicator.main()
 
 
