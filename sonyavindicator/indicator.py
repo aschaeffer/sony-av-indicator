@@ -746,7 +746,7 @@ class FeedbackWatcher(threading.Thread):
 
     def check_volume(self, data):
         if FEEDBACK_VOLUME == data[:-1]:
-            vol = ord(data[-1])
+            vol = data[-1]
             if vol < LIMIT_VOLUME:
                 self.state_service.update_volume(vol)
             else:
@@ -804,13 +804,13 @@ class FeedbackWatcher(threading.Thread):
     def check_timer(self, data):
         if FEEDBACK_TIMER_PREFIX == data[:-3]:
             if FEEDBACK_TIMER_SET == data[-1]:
-                self.state_service.update_timer(ord(data[-3]), ord(data[-2]), ord(data[-1]), True, False)
+                self.state_service.update_timer(data[-3], data[-2], data[-1], True, False)
                 return True
             elif FEEDBACK_TIMER_UPDATE == data[-1]:
-                self.state_service.update_timer(ord(data[-3]), ord(data[-2]), ord(data[-1]), True, True)
+                self.state_service.update_timer(data[-3], data[-2], data[-1], True, True)
                 return True
             elif FEEDBACK_TIMER_OFF == data[-1]:
-                self.state_service.update_timer(ord(data[-3]), ord(data[-2]), ord(data[-1]), False, False)
+                self.state_service.update_timer(data[-3], data[-2], data[-1], False, False)
                 return True
             else:
                 return True
@@ -818,11 +818,11 @@ class FeedbackWatcher(threading.Thread):
 
     def check_fmtuner(self, data):
         if FEEDBACK_FMTUNER_PREFIX == data[0:5]:
-            fmtuner = ord(data[5])
+            fmtuner = data[5]
             stereo = True
             if data[6] == FEEDBACK_FMTUNER_MONO:
                 stereo = False
-            freq = round(((ord(data[7]) * 255 + ord(data[8])) / 99.5) - 0.1, 1)
+            freq = round(((data[7] * 255 + data[8]) / 99.5) - 0.1, 1)
             self.state_service.update_fmtuner(fmtuner, stereo, freq)
             self.state_service.update_source("fmTuner")
             return True
@@ -899,7 +899,7 @@ class FeedbackWatcher(threading.Thread):
                    not self.ended:
                     self.debug_data(data, "[unknown data packet]\n")
             except socket.timeout as e:
-                self.logger.exception("Timeout: reconnecting...")
+                self.logger.debug("Timeout: reconnecting...")
                 self.reconnect()
             except Exception as e:
                 self.logger.exception("Failed to process data: reconnecting...")
